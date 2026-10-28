@@ -1,0 +1,9 @@
+data/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+*.fits
+*.fits.gz
+runs/
