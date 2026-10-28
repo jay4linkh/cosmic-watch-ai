@@ -1,0 +1,9 @@
+# planned dependencies (not pinned yet)
+alerce
+astroquery
+astropy
+numpy
+pillow
+requests
+ultralytics
+torch
