@@ -12,6 +12,7 @@ import { createDeep } from './views/deep.js';
 import { createSun } from './views/sun.js';
 import { createBlackHoles } from './views/blackholes.js';
 import { createInspector } from './inspect.js';
+import { createDeepZoom } from './deepzoom.js';
 
 const $ = (s) => document.querySelector(s);
 const SOURCE_COLOR = { lsst: '#67e8f9', ztf: '#5eead4', jwst: '#fcd34d', hst: '#d8b4fe', sdo: '#fdba74', alerts: '#a78bfa', mast: '#60a5fa' };
@@ -88,6 +89,49 @@ const inspector = createInspector(ctx);
 const INSPECT_HOME = { pos: [-2, 7, 44], target: [6, 0, 0] };
 const INSPECT_FAR = 46, INSPECT_NEAR = 13;
 
+// ---------- deep zoom (tiled real pixels) ----------
+const dz = createDeepZoom({
+  toast: (h, c) => toast(h, c),
+  onClose: () => {
+    state.target = Math.min(state.target, 0.8);
+    dzAuto = false;
+    if (!state.inspecting && current?.name === 'deep') flyTo(current.home, 900);   // back out of texture range
+  },
+});
+let dzAuto = false;      // opened by zooming past the end of Inspect's zoom
+function deepSpec(t) {
+  if (!t) return null;
+  if (t.kind === 'galaxy' && t.crop) {
+    return { kind: 'image', imageId: t.crop.id, u: +t.crop.u, v: +t.crop.v, r: +t.crop.r * 1.6, kicker: t.kicker.replace('INSPECT', 'DEEP ZOOM'), title: t.title };
+  }
+  if (t.kind === 'bh' && t.sky) return { kind: 'sky', ...t.sky, kicker: t.kicker.replace('INSPECT', 'DEEP ZOOM'), title: t.title };
+  return null;
+}
+// Deep Field view: once the camera is so close that one texture pixel covers more than one screen pixel,
+// the flat texture would smear, so hand over to the tiled full-resolution image at the same framing.
+let deepHandoverBlocked = false;
+const SCREEN_CENTER = new THREE.Vector2(0, 0);
+function deepFieldHandover() {
+  if (dz.isOpen || flight || state.inspecting || current?.name !== 'deep' || state.explode > 0.25) return;
+  raycaster.setFromCamera(SCREEN_CENTER, camera);
+  const h = current.planeHit(raycaster);
+  if (!h) return;
+  const halfH = h.distance * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  const magnified = innerHeight / (2 * halfH) / h.texPerUnit;      // screen px per texture px
+  if (deepHandoverBlocked) { if (magnified < 0.6) deepHandoverBlocked = false; return; }
+  if (magnified < 1) return;
+  deepHandoverBlocked = true;
+  dz.open({
+    kind: 'image', imageId: h.meta.id, u: h.u, v: h.v, r: (halfH * camera.aspect) / h.W, rh: halfH / h.W,
+    kicker: `${h.meta.source.toUpperCase()} · ${h.meta.target} · DEEP ZOOM`, title: h.meta.title,
+  });
+}
+
+function openDeep() {
+  const s = state.inspecting && deepSpec(inspector.target);
+  if (s) dz.open(s);
+}
+
 async function openInspect(target) {
   if (!state.inspecting) {
     $('#fade').style.opacity = 1;
@@ -117,6 +161,7 @@ async function closeInspect({ fly = true } = {}) {
   if (!state.inspecting) return;
   $('#fade').style.opacity = 1;
   await new Promise((r) => setTimeout(r, 240));
+  dz.close();
   inspector.close();
   scene.remove(inspector.group);
   hideLabels(inspector.group);
@@ -133,6 +178,10 @@ async function closeInspect({ fly = true } = {}) {
   $('#fade').style.opacity = 0;
 }
 $('#inspect-back').addEventListener('click', () => closeInspect());
+$('#inspect-deep').addEventListener('click', openDeep);
+// A trackpad pinch arrives as ctrl+wheel: zoom the scene, never the browser page (page zoom only magnifies pixels).
+addEventListener('wheel', (e) => { if (e.ctrlKey && !dz.isOpen) e.preventDefault(); }, { passive: false });
+['gesturestart', 'gesturechange'].forEach((t) => addEventListener(t, (e) => e.preventDefault(), { passive: false }));
 canvas.addEventListener('wheel', (e) => {
   if (!state.inspecting) return;
   e.preventDefault();
@@ -154,6 +203,7 @@ const ease = (t) => 1 - Math.pow(1 - t, 3);
 async function switchView(name) {
   const next = views[name];
   if (!next) return;
+  dz.close();
   if (state.inspecting) await closeInspect({ fly: next === current });
   if (next === current) return;
   $('#fade').style.opacity = 1;
@@ -184,6 +234,7 @@ function renderInfo() {
   $('#info-title').textContent = i.title;
   $('#info-sub').textContent = i.sub;
   $('#info-stats').innerHTML = (i.stats || []).slice(0, 6).map(([k, v]) => `<div class="stat"><b>${v}</b><span>${k}</span></div>`).join('');
+  $('#inspect-deep').hidden = !(state.inspecting && deepSpec(inspector.target));
   $('#info-legend').innerHTML = (i.legend || []).map(([k, c]) => `<div><i style="background:${c};color:${c}"></i>${k}</div>`).join('');
   renderClassify();
 }
@@ -346,9 +397,9 @@ async function toggleHandMode() {
     hands = hands || new HandController({
       video: $('#cam'), canvas: hc,
       on: {
-        explode: (v) => setExplodeTarget(v),
-        rotate: (dx, dy) => (state.inspecting && inspector.fullness > 0.8 ? inspector.tiltBy(dx, dy) : rotateCamera(dx, dy)),
-        zoom: (f) => zoomCamera(f),
+        explode: (v) => (dz.isOpen ? dz.handOpen(v) : setExplodeTarget(v)),
+        rotate: (dx, dy) => (dz.isOpen ? dz.panBy(dx, dy) : state.inspecting && inspector.fullness > 0.8 ? inspector.tiltBy(dx, dy) : rotateCamera(dx, dy)),
+        zoom: (f) => (dz.isOpen ? dz.zoomBy(1 / (f * f)) : zoomCamera(f)),
         point: (x, y) => { handHoverDom(x, y); hoverAt(x, y); },
         pointEnd: () => { handHoverDom(-1, -1); if (hoverObj) { hoverObj = null; current?.unhover?.(); hideTip(); } },
         select: (x, y) => {
@@ -359,12 +410,14 @@ async function toggleHandMode() {
           if (hit) current.pick?.(hit.object, hit);
         },
         snap: async () => {
-          if (state.inspecting) { await inspector.next(); renderInfo(); renderItems(); toast('Snap · next object', '#fbbf24'); }
+          if (dz.isOpen) { dz.toggleOverlay(); toast('Snap · AI overlay', '#fbbf24'); }
+          else if (state.inspecting) { await inspector.next(); renderInfo(); renderItems(); toast('Snap · next object', '#fbbf24'); }
           else if (current.next) { await current.next(); renderItems(); toast('Snap · next item', '#fbbf24'); }
           else { switchView(VIEW_ORDER[(VIEW_ORDER.indexOf(current.name) + 1) % VIEW_ORDER.length]); }
         },
         fist: () => {
-          if (state.inspecting) closeInspect();
+          if (dz.isOpen) dz.close();
+          else if (state.inspecting) closeInspect();
           else if (current.name !== 'observatory') switchView('observatory');
         },
         presence: (p) => document.body.classList.toggle('hands-active', p),
@@ -548,7 +601,9 @@ addEventListener('keydown', async (e) => {
   else if (state.inspecting && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { await inspector.next(e.key === 'ArrowRight' ? 1 : -1); renderInfo(); renderItems(); }
   else if (e.key === 'ArrowRight' && current?.next) { await current.next(); renderItems(); }
   else if (e.key === 'ArrowLeft' && current?.selectItem) { await current.selectItem(current.itemIndex - 1); renderItems(); }
-  else if (e.key === 'Escape') { if (state.inspecting) closeInspect(); else $('#detail').classList.remove('open'); }
+  else if ((e.key === 'z' || e.key === 'Z') && state.inspecting && !dz.isOpen) openDeep();
+  else if ((e.key === 'o' || e.key === 'O') && dz.isOpen) dz.toggleOverlay();
+  else if (e.key === 'Escape') { if (dz.isOpen) dz.close(); else if (state.inspecting) closeInspect(); else $('#detail').classList.remove('open'); }
 });
 
 // ---------- tour ----------
@@ -614,6 +669,7 @@ function frame() {
 
   if (state.inspecting) {
     inspector.update(dt, t, state.explode);
+    if (!dz.isOpen && !dzAuto && state.target >= 0.97 && inspector.fullness >= 0.99 && deepSpec(inspector.target)) { dzAuto = true; openDeep(); }
     controls.enableRotate = inspector.fullness < 0.8;
     // zoom = camera distance: open hand / wheel / slider all drive it
     if (!flight) {
@@ -624,6 +680,7 @@ function frame() {
   } else if (current) {
     if (current.name === 'observatory') current.setExplode(state.explode);
     current.update(dt, t, state.explode);
+    deepFieldHandover();
   }
   // Hand mode: while a hand is interacting the camera fades out and full space comes back.
   const immersed = !state.handMode || document.body.classList.contains('hands-active');
@@ -632,8 +689,10 @@ function frame() {
   bg.children[1].visible = immersed;
   bloom.strength = state.handMode ? 0.8 : 0.6;
 
-  composer.render();
-  labelRenderer.render(scene, camera);
+  if (!dz.isOpen) {          // the 3D scene is hidden behind deep zoom: save the GPU
+    composer.render();
+    labelRenderer.render(scene, camera);
+  }
 
   fpsAcc += dt; fpsN++;
   if (fpsAcc > 0.5) { fps = Math.round(fpsN / fpsAcc); fpsAcc = 0; fpsN = 0; }

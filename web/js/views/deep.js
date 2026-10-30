@@ -161,6 +161,14 @@ export function createDeep(ctx) {
     title: 'Deep Field',
     group,
     get hoverables() { return current ? [current.points] : []; },
+    // Where a ray meets the flat image, and how sharp the texture there is (for handing over to deep zoom).
+    planeHit(raycaster) {
+      if (!current) return null;
+      const h = raycaster.intersectObject(current.plane, false)[0];
+      if (!h?.uv) return null;
+      const texW = current.plane.material.map?.image?.width || 2048;
+      return { meta: current.meta, u: h.uv.x, v: 1 - h.uv.y, distance: h.distance, texPerUnit: texW / current.W, W: current.W };
+    },
     home: { pos: [0, 0, 70], target: [0, 0, -10] },
     autoRotate: false,
     explodeLabel: 'Exploded view',

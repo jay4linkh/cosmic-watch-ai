@@ -1,0 +1,329 @@
+{
+  "version": "galaxy_cnn_v2",
+  "sha256": "4fd9cf456ba480725500182c0009b76498fec4ccb1b9c970113cea040add5b20",
+  "file": "galaxy_cnn_v2.onnx",
+  "architecture": "Zoobot greyscale ConvNeXt-nano (pretrained on Galaxy Zoo), fine-tuned",
+  "input": "grey 224x224, 1 channel(s)",
+  "size": 224,
+  "channels": 1,
+  "tta_rotations": 4,
+  "normalize": {
+    "mean": 0.0,
+    "std": 1.0
+  },
+  "classes": [
+    "Disturbed",
+    "Merging",
+    "Round smooth",
+    "In-between round smooth",
+    "Cigar-shaped smooth",
+    "Barred spiral",
+    "Unbarred tight spiral",
+    "Unbarred loose spiral",
+    "Edge-on without bulge",
+    "Edge-on with bulge"
+  ],
+  "coarse": {
+    "merger": [
+      0,
+      1
+    ],
+    "elliptical": [
+      2,
+      3,
+      4
+    ],
+    "spiral": [
+      5,
+      6,
+      7
+    ],
+    "edge-on": [
+      8,
+      9
+    ]
+  },
+  "data": {
+    "galaxy10_decals": 17736,
+    "train": 15080,
+    "val": 2656,
+    "your_labels": 0
+  },
+  "training": {
+    "epochs": 18,
+    "batch": 64,
+    "lr": 0.001,
+    "encoder_lr": 0.0002,
+    "device": "cuda",
+    "augmentation": "rotation, flip, zoom, gamma stretch, PSF blur, noise (telescope-agnostic, greyscale)"
+  },
+  "val_metrics": {
+    "accuracy": 0.8867,
+    "top2_accuracy": 0.9718,
+    "coarse_accuracy": 0.9273,
+    "per_class_recall": {
+      "Disturbed": 0.574,
+      "Merging": 0.935,
+      "Round smooth": 0.952,
+      "In-between round smooth": 0.934,
+      "Cigar-shaped smooth": 0.96,
+      "Barred spiral": 0.951,
+      "Unbarred tight spiral": 0.828,
+      "Unbarred loose spiral": 0.784,
+      "Edge-on without bulge": 0.953,
+      "Edge-on with bulge": 0.943
+    },
+    "confusion": [
+      [
+        93,
+        5,
+        7,
+        10,
+        4,
+        7,
+        5,
+        28,
+        1,
+        2
+      ],
+      [
+        5,
+        259,
+        3,
+        2,
+        1,
+        1,
+        0,
+        4,
+        0,
+        2
+      ],
+      [
+        5,
+        3,
+        377,
+        0,
+        0,
+        0,
+        10,
+        0,
+        0,
+        1
+      ],
+      [
+        5,
+        2,
+        0,
+        284,
+        8,
+        0,
+        4,
+        0,
+        0,
+        1
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        48,
+        0,
+        0,
+        0,
+        1,
+        1
+      ],
+      [
+        3,
+        1,
+        0,
+        0,
+        0,
+        291,
+        4,
+        6,
+        1,
+        0
+      ],
+      [
+        1,
+        3,
+        10,
+        8,
+        0,
+        3,
+        227,
+        19,
+        3,
+        0
+      ],
+      [
+        19,
+        6,
+        2,
+        2,
+        0,
+        17,
+        32,
+        309,
+        6,
+        1
+      ],
+      [
+        1,
+        2,
+        0,
+        0,
+        0,
+        0,
+        1,
+        1,
+        203,
+        5
+      ],
+      [
+        2,
+        0,
+        0,
+        0,
+        0,
+        3,
+        0,
+        7,
+        4,
+        264
+      ]
+    ]
+  },
+  "history": [
+    {
+      "epoch": 1,
+      "loss": 1.0912,
+      "accuracy": 0.8754,
+      "top2_accuracy": 0.9616,
+      "coarse_accuracy": 0.9149
+    },
+    {
+      "epoch": 2,
+      "loss": 0.7851,
+      "accuracy": 0.8389,
+      "top2_accuracy": 0.9488,
+      "coarse_accuracy": 0.91
+    },
+    {
+      "epoch": 3,
+      "loss": 0.7955,
+      "accuracy": 0.8712,
+      "top2_accuracy": 0.9541,
+      "coarse_accuracy": 0.9142
+    },
+    {
+      "epoch": 4,
+      "loss": 0.7671,
+      "accuracy": 0.8569,
+      "top2_accuracy": 0.9552,
+      "coarse_accuracy": 0.9175
+    },
+    {
+      "epoch": 5,
+      "loss": 0.7568,
+      "accuracy": 0.8716,
+      "top2_accuracy": 0.9578,
+      "coarse_accuracy": 0.9168
+    },
+    {
+      "epoch": 6,
+      "loss": 0.7406,
+      "accuracy": 0.8618,
+      "top2_accuracy": 0.9544,
+      "coarse_accuracy": 0.9213
+    },
+    {
+      "epoch": 7,
+      "loss": 0.7205,
+      "accuracy": 0.8803,
+      "top2_accuracy": 0.9631,
+      "coarse_accuracy": 0.9164
+    },
+    {
+      "epoch": 8,
+      "loss": 0.7045,
+      "accuracy": 0.875,
+      "top2_accuracy": 0.9676,
+      "coarse_accuracy": 0.9179
+    },
+    {
+      "epoch": 9,
+      "loss": 0.6795,
+      "accuracy": 0.8758,
+      "top2_accuracy": 0.9642,
+      "coarse_accuracy": 0.9217
+    },
+    {
+      "epoch": 10,
+      "loss": 0.6634,
+      "accuracy": 0.8795,
+      "top2_accuracy": 0.9639,
+      "coarse_accuracy": 0.9224
+    },
+    {
+      "epoch": 11,
+      "loss": 0.6358,
+      "accuracy": 0.8791,
+      "top2_accuracy": 0.9661,
+      "coarse_accuracy": 0.916
+    },
+    {
+      "epoch": 12,
+      "loss": 0.6244,
+      "accuracy": 0.8825,
+      "top2_accuracy": 0.9714,
+      "coarse_accuracy": 0.9232
+    },
+    {
+      "epoch": 13,
+      "loss": 0.6033,
+      "accuracy": 0.8852,
+      "top2_accuracy": 0.9657,
+      "coarse_accuracy": 0.9228
+    },
+    {
+      "epoch": 14,
+      "loss": 0.5738,
+      "accuracy": 0.8852,
+      "top2_accuracy": 0.9703,
+      "coarse_accuracy": 0.9247
+    },
+    {
+      "epoch": 15,
+      "loss": 0.5597,
+      "accuracy": 0.8852,
+      "top2_accuracy": 0.9691,
+      "coarse_accuracy": 0.9236
+    },
+    {
+      "epoch": 16,
+      "loss": 0.5494,
+      "accuracy": 0.8855,
+      "top2_accuracy": 0.971,
+      "coarse_accuracy": 0.9243
+    },
+    {
+      "epoch": 17,
+      "loss": 0.5354,
+      "accuracy": 0.8837,
+      "top2_accuracy": 0.971,
+      "coarse_accuracy": 0.9262
+    },
+    {
+      "epoch": 18,
+      "loss": 0.5367,
+      "accuracy": 0.8867,
+      "top2_accuracy": 0.9718,
+      "coarse_accuracy": 0.9273
+    }
+  ],
+  "caveats": "Trained on DECaLS ground-based colour images converted to grey; our live images are JWST/HST single-filter previews, so expect lower accuracy there, especially for small or faint sources.",
+  "trained_at": "2026-10-30 19:32:30 UTC"
+}
