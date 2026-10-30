@@ -265,8 +265,11 @@ body.inspecting #agent { opacity: 0.9; }
 .hand-hover { outline: 2px solid var(--cyan) !important; outline-offset: 2px; box-shadow: 0 0 22px rgba(103,232,249,0.6) !important; }
 
 /* ---------- deep zoom ---------- */
-.dz { position: fixed; inset: 0; z-index: 5; background: #000; opacity: 0; pointer-events: none; transition: opacity .45s; }
-.dz.open { opacity: 1; pointer-events: auto; }
+/* closed = visibility hidden too: OpenSeadragon's own elements set pointer-events, so a merely transparent
+   viewer would keep swallowing the mouse wheel meant for the 3D scene */
+.dz { position: fixed; inset: 0; z-index: 5; background: #000; opacity: 0; visibility: hidden; pointer-events: none;
+  transition: opacity .45s, visibility 0s linear .45s; }
+.dz.open { opacity: 1; visibility: visible; pointer-events: auto; transition: opacity .45s, visibility 0s; }
 .dz-view { position: absolute !important; inset: 0; width: 100%; height: 100%; }   /* OpenSeadragon sets position: relative */
 body.deepzoom #info, body.deepzoom #trace, body.deepzoom #items, body.deepzoom #inspect-bar, body.deepzoom #detail,
 body.deepzoom #agent, body.deepzoom #hud, body.deepzoom #labels { display: none !important; }
