@@ -77,6 +77,12 @@ as you zoom; drag or pinch turns it). Then **classify it yourself**; your labels
 - **Rubin / ZTF alerts**: an alert carries only a tiny cut-out, so the background is the same patch of sky, deep and sharp,
   from the [DESI Legacy Imaging Surveys](https://www.legacysurvey.org/) (fetched tile by tile and cached). The alert is
   pinned at its exact position, other alerts in the field show up too, and the **host galaxy** is found and classified by our CNN.
+- **✨ AI enhance** (button or `E`, JWST/Hubble): adds one extra 2× level past the real pixels, made by a
+  super-resolution network on your GPU: **SwinIR ×2** (sharper, stays close to the data) or **Real-ESRGAN ×2**
+  (cleaner, but smooths away faint sources). That detail is *invented*: the view gets a pink frame and an
+  "AI-enhanced · invented detail" label, and enhanced pixels never feed the CNN, detectors or anomaly scores.
+  Needs PyTorch + [spandrel](https://github.com/chaiNNer-org/spandrel) (`requirements-train.txt`); weights download on
+  first use. On a server without them the button simply doesn't appear.
 - A readout always says whether you are looking at real pixels or **beyond native resolution** (smoothly interpolated, no
   invented detail). Zoom back out past the whole picture to return to 3D. Hand mode: two-hand pinch zooms, open hand
   keeps zooming in, pinch-drag pans, snap toggles the AI overlay, fist goes back.
@@ -169,7 +175,7 @@ python -m cosmic_watch.ml.infer      # classify all stored images
 | Unsupervised anomaly detection (Isolation Forest) | `anomaly.py` |
 | Reinforcement learning (Thompson-sampling bandit) | `agent.py` |
 | Deep-learning hand-landmark CNN (MediaPipe), One-Euro filtering, gesture state machine with hysteresis | `web/js/hands.js` |
-| Multi-resolution image pyramids (deep zoom), gnomonic (TAN) sky projection, asinh display stretch | `deepzoom.py`, `web/js/deepzoom.js` |
+| Multi-resolution image pyramids (deep zoom), gnomonic (TAN) sky projection, asinh display stretch, super-resolution (SwinIR transformer, Real-ESRGAN GAN), labelled as invented detail | `deepzoom.py`, `web/js/deepzoom.js` |
 | Human-in-the-loop labelling (Galaxy Zoo style) → training data | Inspect mode, `/api/labels` |
 | Third-party ML classifiers (ALeRCE stamp + light-curve classifiers) | alert classes |
 
