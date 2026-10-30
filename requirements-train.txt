@@ -7,3 +7,4 @@ timm
 huggingface_hub
 safetensors
 spandrel        # AI enhance (SwinIR / Real-ESRGAN) in deep zoom
+onnxconverter-common   # float16 export of the Mars CNN

@@ -160,3 +160,22 @@ export async function api(path) {
   if (!r.ok) throw new Error(`${path}: ${r.status}`);
   return r.json();
 }
+
+// Tiny SVG line chart for live panels. series: [[isoTime, value], ...]
+export function sparkline(series, { w = 300, h = 64, log = false, min = null, max = null, color = '#67e8f9', lines = [], zero = null } = {}) {
+  const pts = (series || []).filter((p) => p[1] != null && (!log || p[1] > 0));
+  if (pts.length < 2) return '<div class="spark-empty">no data yet</div>';
+  const t0 = Date.parse(pts[0][0]), t1 = Date.parse(pts[pts.length - 1][0]);
+  const f = (v) => (log ? Math.log10(v) : v);
+  const vs = pts.map((p) => f(p[1]));
+  const lo = min != null ? f(min) : Math.min(...vs), hi = max != null ? f(max) : Math.max(...vs);
+  const X = (t) => ((Date.parse(t) - t0) / Math.max(t1 - t0, 1)) * w;
+  const Y = (v) => h - ((f(v) - lo) / Math.max(hi - lo, 1e-9)) * (h - 6) - 3;
+  const d = pts.map((p, i) => `${i ? 'L' : 'M'}${X(p[0]).toFixed(1)},${Y(p[1]).toFixed(1)}`).join('');
+  const guide = lines.filter(([v]) => f(v) >= lo && f(v) <= hi)
+    .map(([v, txt]) => `<line x1="0" x2="${w}" y1="${Y(v)}" y2="${Y(v)}" class="spark-guide"/><text x="${w - 2}" y="${Y(v) - 2}" text-anchor="end" class="spark-lbl">${txt}</text>`).join('');
+  const z = zero != null && f(zero) >= lo && f(zero) <= hi ? `<line x1="0" x2="${w}" y1="${Y(zero)}" y2="${Y(zero)}" class="spark-zero"/>` : '';
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${guide}${z}<path d="${d}" fill="none" stroke="${color}" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg>`;
+}
+
+export const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));

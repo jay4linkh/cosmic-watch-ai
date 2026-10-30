@@ -1,11 +1,13 @@
 # Cosmic Watch AI 🔭
 
-Fetches **live data from real observatories** (Rubin, ZTF, JWST, Hubble and SDO) and runs
-**computer vision** on it to find galaxies, supernovae, solar active regions and **signs of black-hole activity**.
+Fetches **live data from real observatories and spacecraft** (Rubin, ZTF, JWST, Hubble, SDO, SOHO, GOES, LIGO/Virgo/KAGRA,
+NASA's GCN, the Mars rovers and NASA/JPL's asteroid trackers) and runs **computer vision and our own neural networks** on it:
+galaxies, supernovae, black-hole activity, solar flares and CMEs, gravitational waves, gamma-ray bursts, Martian geology
+and asteroids passing Earth.
 Everything shows up in a **3D observatory** you can fly through, or control with **your bare hands** through the webcam.
 
-> Status: **v1**: live data, computer vision, 3D web app and hand-gesture control all work end to end.
-> The galaxy classifier is rule-based for now; see the [roadmap](#roadmap).
+> Status: **v2**: 13 live feeds, two CNNs trained on this laptop's GPU (galaxies, Mars terrain), deep zoom into real
+> pixels, a learning agent, six 3D worlds and hand-gesture control.
 
 ---
 
@@ -17,6 +19,14 @@ Everything shows up in a **3D observatory** you can fly through, or control with
 | **ZTF** via ALeRCE | Black-hole candidates (TDE, AGN, QSO, Blazar) and supernovae, with cutouts | Last night | Free, no key |
 | **JWST + Hubble** via [MAST](https://mast.stsci.edu) | Newly public science images (released in the last 3 days) | Daily | Free, no key |
 | **SDO** ([NASA](https://sdo.gsfc.nasa.gov)) | Full-disk Sun in visible light and 3 extreme-UV channels | ~15 min | Free, no key |
+| **GOES + NOAA SWPC** | X-ray flux (flare classes), flare list, Kp index, solar wind at L1, active regions with flare odds | 1 min | Free, no key |
+| **SOHO LASCO C2/C3** | Coronagraph images of the corona out to 30 solar radii (CMEs) | ~15-30 min | Free, no key |
+| **LIGO / Virgo / KAGRA** via [GraceDB](https://gracedb.ligo.org) | Significant real gravitational-wave events: type (BBH/BNS/NSBH), distance, sky map | Minutes (during observing runs) | Free, no key |
+| **NASA GCN Circulars** | Gamma-ray bursts, Einstein Probe X-ray flashes, IceCube neutrinos, with positions and redshifts | Minutes to hours | Free, no key |
+| **Mars rovers** (Perseverance, Curiosity) | The newest raw images from science and navigation cameras | Every sol | Free, no key |
+| **NASA/JPL SSD APIs** | Asteroid close approaches (10 lunar distances), Sentry impact-risk list, fireballs | Hourly | Free, no key |
+| **ISS** ([wheretheiss.at](https://wheretheiss.at)) | Live position, speed, altitude | 5 s | Free, no key |
+| **SIMBAD (CfA mirror) · Gaia DR3 (ESA) · NED** | What catalogues know about an alert's position: name, type, parallax, redshift | On demand | Free, no key |
 
 Rubin's full camera frames are not public in real time; only alert cutouts are. Full frames come in yearly data releases.
 
@@ -49,6 +59,43 @@ The older analyst dashboard is still there: `streamlit run dashboard/app.py` (po
 
 > **Windows tip:** if `astropy` fails with *"The filename or extension is too long"*, the project path is too deep.
 > Create the venv somewhere short (e.g. `C:\venvs\cosmic-watch`).
+
+## 🌞 Space weather · 〰️ gravitational waves · 💥 bursts · 🔴 Mars · 🪨 Near Earth
+
+- **The Sun** view has a live space-weather panel: GOES X-rays with flare classes, the week's flares, Kp (and where aurora
+  may be visible), solar-wind speed and Bz, NOAA's flare odds per active region, and the SOHO LASCO coronagraphs as a movie.
+  Our **CME detector** runs a running difference on consecutive coronagraph frames and flags large new bright fronts.
+- **Black Holes** lists the real significant **LIGO/Virgo/KAGRA** events (mock-data-challenge "MS..." test events and
+  retractions are filtered out): inspect one for a 3D model of the merger (inspiral, chirp, flash, ringdown over rippling
+  spacetime) next to the real sky map. Below it, **GCN** gamma-ray bursts, X-ray flashes and neutrinos; one with a position
+  opens in deep zoom on the survey sky, with its redshift and a host-galaxy search. LIGO's O4 run ended in November 2025;
+  new events appear automatically when the next run starts.
+- **Mars** shows a 3D Mars with Perseverance (Jezero crater) and Curiosity (Gale crater) at their real sites and today's raw
+  photos above them. Each photo is classified by **our Mars CNN** (below) and measured with classical CV (sky fraction via
+  regions connected to the top edge, terrain roughness, colour). Click one for deep zoom, NASA's caption and the CNN's call.
+- **Near Earth** shows Earth turning with the real time of day, the Moon's orbit, the ISS live, every asteroid within
+  10 lunar distances in a two-month window (distances square-root scaled, directions illustrative), fireballs on the globe
+  and the Sentry impact-risk table.
+- **Alerts** opened in deep zoom now show their **light curve** (ALeRCE) and what **SIMBAD, Gaia and NED** know about
+  the spot: known name and type, redshift and light-travel distance (Planck 2018), and whether the "transient" sits on a
+  Milky Way star (Gaia parallax).
+
+The agent watches all of it: M/X flares, geomagnetic storms, CME candidates, new gravitational-wave events, gamma-ray
+bursts and neutrinos, asteroids inside the Moon's orbit and Mars science finds all become suggestions.
+
+## 🔴 Our Mars CNN
+
+`cosmic_watch/ml/mars_train.py` fine-tunes an ImageNet ConvNeXt-Tiny on NASA/JPL's labelled Curiosity images
+([MSL v2.1, doi:10.5281/zenodo.4033453](https://doi.org/10.5281/zenodo.4033453): 6,820 images, 19 classes such as drill
+hole, layers, light-toned veins, sand, wheel tracks, distant landscape, rover parts), trained on an RTX 3060 in ~10 minutes.
+On the official **held-out test split** (different sols, unseen terrain): **80.0% accuracy, 89.0% top-3**, balanced
+accuracy 61% (rare geology classes such as float rocks, veins and layers are the weak spot, so the agent only flags them
+when the CNN is confident). Exported to ONNX with float16 weights (56 MB, same accuracy as float32 on a 400-image check).
+Curiosity-trained, so expect some drop on Perseverance's cameras.
+
+```bash
+python -m cosmic_watch.ml.mars_train     # put msl-labeled-data-set-v2.1 in data/datasets/mars/ first
+```
 
 ## The 3D observatory
 
@@ -181,6 +228,9 @@ python -m cosmic_watch.ml.infer      # classify all stored images
 | Unsupervised anomaly detection (Isolation Forest) | `anomaly.py` |
 | Reinforcement learning (Thompson-sampling bandit) | `agent.py` |
 | Deep-learning hand-landmark CNN (MediaPipe), One-Euro filtering, gesture state machine with hysteresis | `web/js/hands.js` |
+| Running-difference change detection on coronagraph frames (CME detector) | `fetchers/spaceweather.py` |
+| Our own Mars terrain CNN (ConvNeXt-Tiny transfer learning), sky segmentation, texture/roughness | `ml/mars_train.py`, `ml/mars.py` |
+| Catalogue cross-matching (SIMBAD, Gaia DR3, NED), light curves, cosmological distances | `context.py` |
 | Multi-resolution image pyramids (deep zoom), gnomonic (TAN) sky projection, asinh display stretch, super-resolution (SwinIR transformer, Real-ESRGAN GAN), labelled as invented detail | `deepzoom.py`, `web/js/deepzoom.js` |
 | Human-in-the-loop labelling (Galaxy Zoo style) → training data | Inspect mode, `/api/labels` |
 | Third-party ML classifiers (ALeRCE stamp + light-curve classifiers) | alert classes |
@@ -204,9 +254,16 @@ cosmic_watch/
 ├── anomaly.py           # Sun flares/activity, deep-field outliers, alert disagreements
 ├── agent.py             # the Cosmic Agent: suggestions + bandit learning
 ├── deepzoom.py          # tile pyramids (JWST/HST + Legacy Survey sky) + host-galaxy CNN
+├── explain.py           # the agent's "what is this, really?" for a clicked detection
+├── context.py           # alert light curves + SIMBAD / Gaia / NED cross-match
 ├── fetchers/
 │   ├── alerts.py        # Rubin + ZTF via ALeRCE
 │   ├── mast.py          # JWST + Hubble new releases
+│   ├── spaceweather.py  # GOES, NOAA SWPC, SOHO LASCO (+ CME detector)
+│   ├── gw.py            # LIGO/Virgo/KAGRA (GraceDB)
+│   ├── gcn.py           # GCN circulars: bursts, neutrinos, X-ray flashes
+│   ├── mars.py          # Perseverance + Curiosity raw images
+│   ├── neo.py           # JPL close approaches, Sentry, fireballs, ISS
 │   └── sdo.py           # latest Sun images
 └── detectors/
     ├── galaxies.py      # star/galaxy detection in deep fields
@@ -251,6 +308,10 @@ data/                    # downloaded images + database (git-ignored)
 ## Credits
 
 Data: Vera C. Rubin Observatory and ZTF alerts via the ALeRCE broker; JWST and HST data from MAST (STScI);
-solar images courtesy of NASA/SDO and the AIA and HMI science teams; sky backgrounds from the DESI Legacy
+solar images courtesy of NASA/SDO and the AIA and HMI science teams; SOHO/LASCO (ESA & NASA); GOES and space-weather
+data from NOAA SWPC; gravitational-wave alerts from the LIGO Scientific Collaboration, Virgo and KAGRA via GraceDB;
+GCN Circulars (NASA); Mars raw images NASA/JPL-Caltech (with ASU and MSSS); asteroid data NASA/JPL SSD/CNEOS; ISS position
+wheretheiss.at; Mars training data Lu & Wagstaff (NASA/JPL); SIMBAD (CDS, via the CfA mirror), Gaia DR3 (ESA), NED (IPAC);
+planet textures Solar System Scope (CC BY 4.0); sky backgrounds from the DESI Legacy
 Imaging Surveys (legacysurvey.org). Galaxy CNN v2 starts from [Zoobot](https://github.com/mwalmsley/zoobot)
 (Walmsley et al.), and the deep-zoom viewer is [OpenSeadragon](https://openseadragon.github.io/).

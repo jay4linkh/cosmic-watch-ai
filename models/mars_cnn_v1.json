@@ -1,0 +1,188 @@
+{
+  "version": "mars_cnn_v1",
+  "file": "mars_cnn_v1.onnx",
+  "sha256": "3520896ab963de77bcd1bf011598e436662e6096cba204582452686d396aa8f3",
+  "architecture": "convnext_tiny.in12k_ft_in1k (ImageNet), fine-tuned",
+  "size": 224,
+  "mean": [
+    0.48500001430511475,
+    0.4560000002384186,
+    0.4059999883174896
+  ],
+  "std": [
+    0.2290000021457672,
+    0.2240000069141388,
+    0.22499999403953552
+  ],
+  "classes": [
+    "Arm cover",
+    "Other rover part",
+    "Artifact",
+    "Nearby surface",
+    "Close-up rock",
+    "DRT",
+    "DRT spot",
+    "Distant landscape",
+    "Drill hole",
+    "Night sky",
+    "Float",
+    "Layers",
+    "Light-toned veins",
+    "Mastcam cal target",
+    "Sand",
+    "Sun",
+    "Wheel",
+    "Wheel joint",
+    "Wheel tracks"
+  ],
+  "data": {
+    "name": "MSL Curiosity Rover Images with Science and Engineering Classes v2.1",
+    "doi": "10.5281/zenodo.4033453",
+    "train": 5920,
+    "val": 300,
+    "test": 600
+  },
+  "val_metrics": {
+    "accuracy": 0.83,
+    "top3_accuracy": 0.9,
+    "balanced_accuracy": 0.8155,
+    "per_class_recall": {
+      "Arm cover": 1.0,
+      "Other rover part": 1.0,
+      "Artifact": 0.903,
+      "Nearby surface": 0.824,
+      "Close-up rock": 0.86,
+      "DRT": 0.75,
+      "DRT spot": 1.0,
+      "Distant landscape": 0.929,
+      "Drill hole": 1.0,
+      "Night sky": 0.667,
+      "Float": 0.4,
+      "Layers": 0.667,
+      "Light-toned veins": 0.25,
+      "Mastcam cal target": 1.0,
+      "Sand": 0.579,
+      "Sun": 1.0,
+      "Wheel": 1.0,
+      "Wheel joint": 1.0,
+      "Wheel tracks": 0.667
+    },
+    "n": 300
+  },
+  "test_metrics": {
+    "accuracy": 0.8,
+    "top3_accuracy": 0.89,
+    "balanced_accuracy": 0.6113,
+    "per_class_recall": {
+      "Arm cover": 1.0,
+      "Other rover part": 0.8,
+      "Artifact": 0.924,
+      "Nearby surface": 0.872,
+      "Close-up rock": 0.75,
+      "DRT": 0.667,
+      "DRT spot": 0.143,
+      "Distant landscape": 1.0,
+      "Drill hole": 0.833,
+      "Night sky": 0.0,
+      "Float": 0.0,
+      "Layers": 0.353,
+      "Light-toned veins": 0.111,
+      "Mastcam cal target": 1.0,
+      "Sand": 0.625,
+      "Sun": 0.737,
+      "Wheel": 1.0,
+      "Wheel joint": 0.8,
+      "Wheel tracks": 0.0
+    },
+    "n": 600
+  },
+  "history": [
+    {
+      "epoch": 1,
+      "loss": 2.4174,
+      "val_acc": 0.78,
+      "val_bal": 0.747
+    },
+    {
+      "epoch": 2,
+      "loss": 1.6325,
+      "val_acc": 0.8,
+      "val_bal": 0.785
+    },
+    {
+      "epoch": 3,
+      "loss": 1.4317,
+      "val_acc": 0.79,
+      "val_bal": 0.7605
+    },
+    {
+      "epoch": 4,
+      "loss": 1.3399,
+      "val_acc": 0.7433,
+      "val_bal": 0.7686
+    },
+    {
+      "epoch": 5,
+      "loss": 1.3007,
+      "val_acc": 0.8067,
+      "val_bal": 0.8192
+    },
+    {
+      "epoch": 6,
+      "loss": 1.2523,
+      "val_acc": 0.7767,
+      "val_bal": 0.7763
+    },
+    {
+      "epoch": 7,
+      "loss": 1.2308,
+      "val_acc": 0.7933,
+      "val_bal": 0.7723
+    },
+    {
+      "epoch": 8,
+      "loss": 1.2042,
+      "val_acc": 0.8267,
+      "val_bal": 0.7705
+    },
+    {
+      "epoch": 9,
+      "loss": 1.1983,
+      "val_acc": 0.8167,
+      "val_bal": 0.802
+    },
+    {
+      "epoch": 10,
+      "loss": 1.1898,
+      "val_acc": 0.8067,
+      "val_bal": 0.7993
+    },
+    {
+      "epoch": 11,
+      "loss": 1.1877,
+      "val_acc": 0.83,
+      "val_bal": 0.8155
+    },
+    {
+      "epoch": 12,
+      "loss": 1.1856,
+      "val_acc": 0.8133,
+      "val_bal": 0.8103
+    },
+    {
+      "epoch": 13,
+      "loss": 1.1856,
+      "val_acc": 0.8067,
+      "val_bal": 0.8088
+    },
+    {
+      "epoch": 14,
+      "loss": 1.1816,
+      "val_acc": 0.8067,
+      "val_bal": 0.8088
+    }
+  ],
+  "caveats": "Trained on Curiosity Mastcam/MAHLI images; Perseverance cameras differ (colour, field of view). Train/val/test are split by sol, so test accuracy reflects new terrain.",
+  "trained_at": "2026-10-30 20:58:36 UTC",
+  "precision": "float16 weights, float32 inputs/outputs (same test accuracy as float32 on a 400-image check: 79.0% vs 78.8%)"
+}

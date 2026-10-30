@@ -17,6 +17,11 @@ INTERVALS = {
     "sdo": 15 * 60,      # SDO publishes new solar images every ~15 min
     "alerts": 10 * 60,   # Rubin + ZTF alerts via ALeRCE arrive within minutes
     "mast": 6 * 3600,    # JWST / Hubble public releases land a few times a day
+    "spacewx": 5 * 60,   # NOAA SWPC X-rays, Kp, solar wind (1-min data) + SOHO LASCO (~12-30 min)
+    "gw": 15 * 60,       # LIGO/Virgo/KAGRA public alerts (GraceDB)
+    "gcn": 15 * 60,      # GCN circulars: gamma-ray bursts, neutrinos, X-ray flashes
+    "mars": 3 * 3600,    # Perseverance + Curiosity raw images (new every sol)
+    "neo": 6 * 3600,     # JPL close approaches, Sentry, fireballs
 }
 
 # MAST: how far back to look for newly public images, and how many to process per run.

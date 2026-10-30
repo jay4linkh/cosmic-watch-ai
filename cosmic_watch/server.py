@@ -29,7 +29,8 @@ log = logging.getLogger("cosmic_watch")
 WEB_DIR = ROOT / "web"
 THUMB_DIR = DATA / "thumbs"
 THUMB_VERSION = 2   # bump when thumbnail processing changes, so browsers refetch
-SOURCES = {"alerts": "Rubin + ZTF alerts", "sdo": "SDO · Sun", "mast": "JWST + Hubble"}
+SOURCES = {"alerts": "Rubin + ZTF alerts", "sdo": "SDO · Sun", "mast": "JWST + Hubble", "spacewx": "Space weather",
+           "gw": "LIGO · gravitational waves", "gcn": "GCN · bursts & neutrinos", "mars": "Mars rovers", "neo": "Near-Earth asteroids"}
 BH_CLASSES = ("TDE", "AGN", "QSO", "Blazar")
 
 
@@ -246,6 +247,94 @@ def detection_cnn(det_id: int):
             "top": [[CNN_CLASSES[i], probs[i]] for i in order[:4]],
             "coarse": {k: round(sum(probs[i] for i in idx), 4) for k, idx in CNN_COARSE.items()},
             "model": cnn.version()}
+
+
+# ---------- live feeds: space weather, LIGO, GCN, asteroids, ISS, Mars ----------
+
+def _feed(key):
+    con = db.connect()
+    try:
+        t, data = db.get_feed(con, key)
+    finally:
+        con.close()
+    if data is None:
+        raise HTTPException(503, f"{key} not fetched yet")
+    return t, data
+
+
+@app.get("/api/spacewx")
+def spacewx():
+    t, d = _feed("spacewx")
+    for cam, l in (d.get("lasco") or {}).items():
+        if l:
+            l["url"] = f"/media/{l['latest']}"
+            l["frame_urls"] = [f"/media/{f}" for f in l.get("frames", [])]
+    return {"fetched_at": iso(t), **d}
+
+
+@app.get("/api/gw")
+def gw_events():
+    t, d = _feed("gw")
+    for e in d.get("events", []):
+        e["skymap_url"] = f"/media/{e['skymap']}" if e.get("skymap") else None
+    return {"fetched_at": iso(t), **d}
+
+
+@app.get("/api/gcn")
+def gcn_events(limit: int = Query(40, le=200)):
+    t, d = _feed("gcn")
+    return {"fetched_at": iso(t), "events": d.get("events", [])[:limit]}
+
+
+@app.get("/api/neo")
+def neo_feed():
+    t, d = _feed("neo")
+    return {"fetched_at": iso(t), **d}
+
+
+_iss_cache = {"t": 0.0, "data": None}
+
+
+@app.get("/api/iss")
+def iss_now():
+    """ISS position, proxied with a 4-second cache (the public API is rate-limited)."""
+    from .fetchers import neo as neo_f
+    if time.time() - _iss_cache["t"] > 4 or _iss_cache["data"] is None:
+        try:
+            _iss_cache["data"] = neo_f.iss()
+            _iss_cache["t"] = time.time()
+        except Exception as e:  # noqa: BLE001
+            if _iss_cache["data"] is None:
+                raise HTTPException(503, f"ISS position unavailable: {e}")
+    return _iss_cache["data"]
+
+
+@app.get("/api/mars")
+def mars_images(limit: int = Query(60, le=200)):
+    out = []
+    for r in rows("SELECT * FROM images WHERE source='mars' ORDER BY obs_time DESC, id DESC LIMIT ?", (limit,)):
+        out.append(image_out(r))
+    return out
+
+
+@app.get("/api/alerts/{survey}/{oid}/context")
+def alert_context(survey: str, oid: str, xmatch: bool = True):
+    """Light curve + what SIMBAD / Gaia / NED know about this spot (cross-match can take ~1 min the first time)."""
+    from . import context
+    r = rows("SELECT ra, dec FROM alerts WHERE survey=? AND oid=? LIMIT 1", (survey, oid))
+    if not r:
+        raise HTTPException(404)
+    out = {"lightcurve": None, "crossmatch": None}
+    try:
+        out["lightcurve"] = context.light_curve(survey, oid)
+    except Exception as e:  # noqa: BLE001
+        out["lightcurve_error"] = str(e)[:200]
+    if xmatch:
+        try:
+            out["crossmatch"] = context.crossmatch(r[0]["ra"], r[0]["dec"])
+        except Exception as e:  # noqa: BLE001
+            out["crossmatch_error"] = str(e)[:200]
+    return out
 
 
 @app.get("/api/explain/detection/{det_id}")

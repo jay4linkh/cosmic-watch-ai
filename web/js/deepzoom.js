@@ -4,6 +4,8 @@
 //   image  a JWST / Hubble image at full resolution, with the AI's galaxies on top
 //   sky    the sky around a Rubin / ZTF alert from the DESI Legacy Surveys, with the
 //          alert (and any others in the field) and its host galaxy, classified by our CNN
+import { sparkline, esc } from './fx.js';
+
 const OSD_URL = 'https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.0/openseadragon.min.js';
 const COARSE_COLOR = { merger: '#f472b6', elliptical: '#fbbf24', spiral: '#67e8f9', 'edge-on': '#a78bfa' };
 const CNN_GROUP = {
@@ -173,7 +175,29 @@ export function createDeepZoom({ onClose, toast }) {
     overlays.push(element);
   }
 
+  // Mars photo: what our Mars CNN and the classical CV measured, plus NASA's caption.
+  function marsCard() {
+    const im = spec.mars, st = im.stats || {};
+    const top = st.scene_top || [];
+    card(`<div class="dz-agent-head"><i class="dz-orb"></i>COSMIC AGENT · MARS</div>
+      ${st.scene ? `<div class="dz-verdict"><b>${esc(st.scene)}</b><span>our Mars CNN · ${Math.round((st.scene_conf || 0) * 100)}%</span></div>
+      <p>${esc(st.scene_note ? st.scene_note[0].toUpperCase() + st.scene_note.slice(1) : '')}.</p>
+      <div class="cnn-box"><div class="cnn-head">MARS CNN · trained on NASA's labelled Curiosity images</div>${cnnBars(top)}</div>` : '<p>Not classified yet.</p>'}
+      <div class="dz-facts">
+        <span>Rover</span><b>${esc(st.rover_name)} · sol ${st.sol}</b>
+        <span>Camera</span><b>${esc(st.camera_name)}</b>
+        <span>Site</span><b>${esc(st.site)}</b>
+        <span>Sky in frame</span><b>${st.sky_fraction ? `${Math.round(st.sky_fraction * 100)}%` : 'none'}</b>
+        <span>Roughness</span><b>${st.roughness != null ? `${(st.roughness * 100).toFixed(1)}% edges ${st.roughness > 0.08 ? '(rocky)' : st.roughness < 0.02 ? '(smooth)' : ''}` : '—'}</b>
+        <span>Pointing</span><b>az ${Math.round(st.az || 0)}° · el ${Math.round(st.el || 0)}°</b>
+      </div>
+      <p class="dz-hint">${esc(st.camera_desc || '')}. ${st.greyscale ? 'Black-and-white camera. ' : ''}</p>
+      ${st.caption ? `<div class="dz-know"><div class="dz-card-k">NASA'S CAPTION</div><p>${esc(st.caption)}</p></div>` : ''}
+      <p class="dz-hint">Raw image: NASA/JPL-Caltech${st.rover === 'perseverance' ? '/ASU' : '/MSSS'}. Not yet calibrated or colour-corrected.</p>`);
+  }
+
   async function imageOverlays(my) {
+    if (spec.mars) { marsCard(); return; }
     const det = await fetch(`/api/images/${spec.imageId}/detections?limit=3000`).then((r) => r.json());
     if (my !== token) return;
     const aspect = info.height / info.width;
@@ -231,7 +255,55 @@ export function createDeepZoom({ onClose, toast }) {
       ${!x.claude_available ? '<p class="dz-hint">Built-in knowledge. Set ANTHROPIC_API_KEY on the server and Claude writes a fuller explanation from these facts.</p>' : ''}`);
   }
 
+  // brightness over time from ALeRCE, and what SIMBAD / Gaia / NED know about the spot
+  async function alertContext(my) {
+    const box = $('.dz-ctx');
+    if (!box || !spec.oid) return;
+    const c = await fetch(`/api/alerts/${spec.survey}/${spec.oid}/context`).then((r) => r.json()).catch(() => null);
+    if (my !== token || !c) return;
+    let html = '';
+    const lc = c.lightcurve;
+    if (lc?.points?.length >= 2) {
+      const iso = (mjd) => new Date((mjd - 40587) * 864e5).toISOString();
+      const bands = [...new Set(lc.points.map((p) => p.band))];
+      const colors = { g: '#4ade80', r: '#f472b6', i: '#fbbf24', u: '#a78bfa', z: '#fb923c', y: '#e6edf7' };
+      html += `<div class="dz-card-k">LIGHT CURVE · ${lc.n} points over ${lc.span_days} days</div>
+        ${bands.map((b) => sparkline(lc.points.filter((p) => p.band === b).map((p) => [iso(p.mjd), -p.mag]), { h: 46, color: colors[b] || '#67e8f9' })).join('')}
+        <p class="dz-hint">Brighter is up. Bands: ${bands.map((b) => `<b style="color:${colors[b] || '#67e8f9'}">${b}</b>`).join(' ')} · range ${lc.brightest}–${lc.faintest} mag
+        (${lc.amplitude} mag change) · ${lc.trend > 0.01 ? 'fading' : lc.trend < -0.01 ? 'brightening' : 'roughly steady'}.</p>`;
+    } else if (lc) {
+      html += '<p class="dz-hint">Only one detection so far: no light curve yet.</p>';
+    }
+    const xm = c.crossmatch, sm = xm?.summary;
+    if (xm) {
+      const known = sm.known_name ? `<b>${esc(sm.known_name)}</b> (${esc(sm.known_type || '?')})` : 'nothing catalogued within 5″';
+      html += `<div class="dz-card-k">WHAT CATALOGUES KNOW · SIMBAD · GAIA · NED</div>
+        <div class="dz-facts"><span>Known as</span><b>${known}</b>
+        <span>Redshift</span><b>${sm.redshift ? `z = ${sm.redshift.toFixed(4)}` : '—'}</b>
+        <span>Light travelled</span><b>${sm.distance_ly ? `${(sm.distance_ly / 1e9).toFixed(sm.distance_ly > 1e9 ? 2 : 3)} billion years` : '—'}</b>
+        <span>On a Milky Way star?</span><b>${sm.on_milky_way_star ? `yes, ${Number(sm.star_distance_ly).toLocaleString()} ly away (Gaia parallax)` : 'no'}</b></div>
+        ${sm.on_milky_way_star ? '<p class="dz-hint">It sits on a star in our own galaxy: a variable star or a flare is more likely than a distant explosion.</p>' : ''}
+        ${!xm.complete ? '<p class="dz-hint">Some catalogue services did not answer; they will be retried.</p>' : ''}`;
+    }
+    box.innerHTML = html || '<p class="dz-hint">No extra context available.</p>';
+  }
+
   async function skyOverlays(my) {
+    if (spec.gcn) {                                    // a GCN burst: mark the reported position
+      const b = el('button', 'dz-alert main');
+      b.style.setProperty('--c', '#f472b6');
+      b.innerHTML = `<i></i><span>${esc(spec.gcn.event)} (reported position)</span>`;
+      addOverlay(b, new OSD.Point(0.5, 0.5));
+      const g = spec.gcn;
+      card(`<div class="dz-card-k">${esc(g.kind_label.toUpperCase())} · GCN</div>
+        <p>${esc(g.explain || '')}</p>
+        ${g.redshift ? `<p><b>Redshift z = ${g.redshift}</b>: this light set out billions of years ago.</p>` : ''}
+        <p class="dz-hint">Background: the same patch of sky from the <b>${info.layer.toUpperCase()}</b> survey, taken years before the burst.
+        Positions from gamma-ray satellites can be uncertain by arcminutes; X-ray and optical afterglows pin it to arcseconds.</p>
+        <div class="dz-host">Looking for a host galaxy…</div>
+        <div class="feed-sub">Reports (${g.n})</div>
+        <ol class="gcn-list">${g.circulars.slice().reverse().slice(0, 8).map((c) => `<li><a href="https://gcn.nasa.gov/circulars/${c.id}" target="_blank" rel="noopener">${esc(c.subject)}</a></li>`).join('')}</ol>`);
+    }
     for (const m of info.alerts) {
       const main = m.oid === spec.oid;
       const b = el('button', `dz-alert${main ? ' main' : ''}`);
@@ -242,13 +314,15 @@ export function createDeepZoom({ onClose, toast }) {
       addOverlay(b, new OSD.Point(m.x, m.y));
     }
     const others = info.alerts.length - 1;
-    card(`<div class="dz-card-k">${spec.cls} · ${spec.survey === 'lsst' ? 'RUBIN' : 'ZTF'} ALERT</div>
+    if (!spec.gcn) card(`<div class="dz-card-k">${spec.cls} · ${spec.survey === 'lsst' ? 'RUBIN' : 'ZTF'} ALERT</div>
       ${spec.stamp ? `<img class="dz-stamp" src="${spec.stamp}" alt="alert cut-outs">
       <div class="dz-stamp-k"><span>tonight</span><span>before</span><span>change</span></div>` : ''}
       <p>The tiny cut-out is everything the alert contains. Behind it: the same patch of sky, deep and sharp,
       from the <b>${info.layer.toUpperCase()}</b> survey (taken years earlier, before this event).</p>
       <div class="dz-host">Looking for the host galaxy…</div>
+      <div class="dz-ctx"><p class="dz-hint">Loading the light curve and asking SIMBAD, Gaia and NED (first time can take a minute)…</p></div>
       ${others > 0 ? `<p class="dz-hint">${others} other alert${others > 1 ? 's' : ''} we know of ${others > 1 ? 'are' : 'is'} in this field.</p>` : ''}`);
+    alertContext(my);
     const h = await fetch(`/api/dz/host?ra=${spec.ra}&dec=${spec.dec}`).then((r) => r.json()).catch(() => null);
     if (my !== token) return;
     const box = $('.dz-host');

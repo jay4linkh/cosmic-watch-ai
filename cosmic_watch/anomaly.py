@@ -285,8 +285,141 @@ def run_alerts(con) -> int:
     return n
 
 
+# ---------- space weather, gravitational waves, bursts, asteroids, Mars ----------
+
+FLARE_LETTERS = {"M": 0.6, "X": 0.95}
+
+
+def run_spacewx(con) -> int:
+    _, sw = db.get_feed(con, "spacewx")
+    if not sw:
+        return 0
+    n = 0
+    for f in sw.get("flares") or []:
+        cls = f.get("class") or ""
+        if cls[:1] in FLARE_LETTERS:
+            n += record(con, {
+                "key": f"flare:{f['begin']}", "source": "spacewx", "kind": "solar_flare",
+                "score": FLARE_LETTERS[cls[0]], "title": f"{cls} solar flare",
+                "reason": f"GOES saw an {cls} flare peak at {(f.get('max') or '')[11:16]} UTC: a strong burst of X-rays that can "
+                          "cause radio blackouts on Earth's day side.",
+                "hypotheses": ["a flare from a complex sunspot group", "the start of a coronal mass ejection",
+                               "more flares from the same region"],
+                "ref": {"view": "sun"}})
+    kp = ((sw.get("kp") or {}).get("now") or {}).get("kp")
+    if kp is not None and kp >= 5:
+        g = min(5, int(kp) - 4)
+        n += record(con, {
+            "key": f"storm:{(sw['kp']['now']['time'] or '')[:13]}", "source": "spacewx", "kind": "geomagnetic_storm",
+            "score": min(1.0, 0.5 + 0.1 * g), "title": f"Geomagnetic storm (G{g}, Kp {kp:.1f})",
+            "reason": f"The planetary K index is {kp:.1f}: Earth's magnetic field is being shaken by the solar wind. Aurora may be "
+                      "visible far from the poles.",
+            "hypotheses": ["a coronal mass ejection arriving", "a fast solar-wind stream from a coronal hole",
+                           "a southward magnetic field (Bz) in the wind"],
+            "ref": {"view": "sun"}})
+    for cam, l in (sw.get("lasco") or {}).items():
+        c = (l or {}).get("cme") or {}
+        if c.get("area_frac", 0) >= 0.02:
+            n += record(con, {
+                "key": f"cme:{cam}:{l['time']}", "source": "spacewx", "kind": "cme_candidate",
+                "score": c["score"], "title": f"Possible CME in LASCO {cam.upper()}",
+                "reason": f"Our running-difference check found a new bright front covering {c['area_frac'] * 100:.1f}% of the "
+                          f"coronagraph field, at position angle {c['angle_deg']} degrees.",
+                "hypotheses": ["a coronal mass ejection", "a bright streamer change", "a comet or a camera artifact"],
+                "ref": {"view": "sun", "lasco": cam}})
+    return n
+
+
+GW_WHAT = {"BBH": "two black holes merged", "BNS": "two neutron stars merged",
+           "NSBH": "a black hole swallowed a neutron star", "Terrestrial": "it might be noise on Earth"}
+
+
+def run_gw(con) -> int:
+    _, g = db.get_feed(con, "gw")
+    n = 0
+    for e in (g or {}).get("events", [])[:15]:
+        cls = e.get("class")
+        p = (e.get("classification") or {}).get(cls or "", 0)
+        what = GW_WHAT.get(cls, "the type is not public")
+        dist = f" about {e['distance_mpc'] * 3.262 / 1000:.1f} billion light-years away" if e.get("distance_mpc") else ""
+        prob = f" ({p:.0%} probability)" if p else ""
+        n += record(con, {
+            "key": f"gw:{e['id']}", "source": "gw", "kind": "gw_event",
+            "score": 0.95 if cls in ("BNS", "NSBH") else 0.7, "title": f"Gravitational waves: {e['id']}",
+            "reason": f"LIGO/Virgo/KAGRA detected a ripple in spacetime on {e['time'][:10]}: {what}{dist}{prob}.",
+            "hypotheses": ["a binary black-hole merger", "a neutron-star collision (look for light!)",
+                           "a black hole eating a neutron star"],
+            "ref": {"view": "bh", "gw": e["id"]}})
+    return n
+
+
+GCN_HYP = {"grb": ["a massive star collapsing into a black hole", "two neutron stars merging", "a magnetar giant flare"],
+           "neutrino": ["a blazar jet", "a tidal disruption event", "a chance cosmic-ray coincidence"],
+           "xray": ["a gamma-ray-burst cousin", "a stellar flare", "a newborn magnetar"],
+           "frb": ["a magnetar in another galaxy", "a young neutron star", "something unexplained"]}
+
+
+def run_gcn(con) -> int:
+    _, g = db.get_feed(con, "gcn")
+    n = 0
+    for e in (g or {}).get("events", [])[:25]:
+        if e["kind"] not in GCN_HYP:
+            continue
+        z = f" Its redshift is z = {e['redshift']}: light that left long before Earth existed." if e.get("redshift") else ""
+        latest = e["circulars"][-1]["subject"][:110]
+        n += record(con, {
+            "key": f"gcn:{e['event']}", "source": "gcn", "kind": f"gcn_{e['kind']}",
+            "score": round(min(1.0, 0.45 + 0.03 * e["n"] + (0.2 if e.get("redshift") else 0)), 3),
+            "title": f"{e['kind_label']}: {e['event']}",
+            "reason": f"{e['n']} report(s) from observatories worldwide; latest: '{latest}'.{z}",
+            "hypotheses": GCN_HYP[e["kind"]],
+            "ref": {"view": "bh", "gcn": e["event"]}})
+    return n
+
+
+def run_neo(con) -> int:
+    _, d = db.get_feed(con, "neo")
+    n = 0
+    for a in (d or {}).get("approaches", []):
+        if a["dist_ld"] <= 1.0:
+            size = f"{a['size_m'][0]}-{a['size_m'][1]} m" if a.get("size_m") else "unknown size"
+            n += record(con, {
+                "key": f"neo:{a['des']}:{a['time']}", "source": "neo", "kind": "neo_close",
+                "score": round(min(1.0, 1.1 - a["dist_ld"] * 0.6), 3),
+                "title": f"Asteroid {a['name']} inside the Moon's orbit",
+                "reason": f"It passes {a['dist_ld']:.2f} lunar distances from Earth ({a['dist_km']:,} km) on {a['time']} UTC at "
+                          f"{a['v_kms']} km/s. Estimated size {size}.",
+                "hypotheses": ["a harmless close flyby", "a small rock discovered days ago", "a target for radar imaging"],
+                "ref": {"view": "neo", "des": a["des"]}})
+    return n
+
+
+MARS_HYP = {"Light-toned veins": ["mineral veins left by ancient water", "a dust streak", "a lighting effect"],
+            "Layers": ["sedimentary layers from an ancient lake", "volcanic layers", "wind-blown deposits"],
+            "Drill hole": ["a fresh sample drill hole", "a crater-like rock pit", "a misclassified shadow"]}
+
+
+def run_mars(con) -> int:
+    from .ml import mars as mars_cv
+    n = 0
+    for r in con.execute("SELECT id, title, stats FROM images WHERE source='mars' ORDER BY id DESC LIMIT 60").fetchall():
+        s = json.loads(r["stats"] or "{}")
+        if s.get("scene") in mars_cv.SCIENCE and (s.get("scene_conf") or 0) >= 0.6:
+            n += record(con, {
+                "key": f"mars:{r['id']}", "source": "mars", "kind": "mars_feature",
+                "score": round(s["scene_conf"], 3), "title": f"{s['scene']} on Mars",
+                "reason": f"Our Mars CNN thinks this {s.get('rover_name')} image (sol {s.get('sol')}) shows "
+                          f"{mars_cv.NOTES.get(s['scene'], s['scene'])} ({s['scene_conf']:.0%}).",
+                "hypotheses": MARS_HYP.get(s["scene"], ["a science target", "an engineering image", "a misclassification"]),
+                "ref": {"view": "mars", "image_id": r["id"]}})
+    return n
+
+
 def run_for(con, source: str) -> int:
     """Called by the pipeline after each source run."""
+    extra = {"spacewx": run_spacewx, "gw": run_gw, "gcn": run_gcn, "neo": run_neo, "mars": run_mars}
+    if source in extra:
+        return extra[source](con)
     if source == "sdo":
         return run_sun(con)
     if source == "mast":
