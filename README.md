@@ -77,6 +77,12 @@ as you zoom; drag or pinch turns it). Then **classify it yourself**; your labels
 - **Rubin / ZTF alerts**: an alert carries only a tiny cut-out, so the background is the same patch of sky, deep and sharp,
   from the [DESI Legacy Imaging Surveys](https://www.legacysurvey.org/) (fetched tile by tile and cached). The alert is
   pinned at its exact position, other alerts in the field show up too, and the **host galaxy** is found and classified by our CNN.
+- **🤖 Click any outline and the Cosmic Agent explains it** (`cosmic_watch/explain.py`): a verdict first ("likely a
+  galaxy: barred spiral", "probably glowing gas, not a galaxy", "a star", "possibly a satellite trail") with the evidence
+  behind it (size in arcseconds, how centrally concentrated the light is, which emission line the filter isolates,
+  what the field is, how sure the CNN is), then background knowledge. This catches the CNN's blind spot: it only knows
+  galaxies, so it calls nebula filaments "Disturbed". With Claude credentials set (`ANTHROPIC_API_KEY`), Claude Opus 5.5
+  also writes a short explanation grounded in the same facts; without them the built-in knowledge is used.
 - **✨ AI enhance** (button or `E`, JWST/Hubble): adds one extra 2× level past the real pixels, made by a
   super-resolution network on your GPU: **SwinIR ×2** (sharper, stays close to the data) or **Real-ESRGAN ×2**
   (cleaner, but smooths away faint sources). That detail is *invented*: the view gets a pink frame and an

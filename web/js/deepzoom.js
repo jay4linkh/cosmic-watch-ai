@@ -189,7 +189,7 @@ export function createDeepZoom({ onClose, toast }) {
       ring.style.cssText = `border-color:${color};transform:rotate(${r[4]}rad)`;
       box.appendChild(ring);
       if (cnn && r[8] >= 0.6 && a > 0.004) box.appendChild(el('span', 'dz-ell-tag', cnn));
-      box.addEventListener('click', (e) => { e.stopPropagation(); focusDetection(r, det, cnn); });
+      box.addEventListener('click', (e) => { e.stopPropagation(); focusDetection(r, det, cnn, box); });
       addOverlay(box, new OSD.Rect(r[0] - a, r[1] * aspect - b, 2 * a, 2 * b));
       n++;
     }
@@ -198,18 +198,37 @@ export function createDeepZoom({ onClose, toast }) {
       <p><b>${n}</b> galaxies outlined · <b>${withCnn}</b> classified by our CNN.</p>
       <div class="dz-legend">${Object.entries(COARSE_COLOR).map(([k, c]) => `<span><i style="border-color:${c}"></i>${k}</span>`).join('')}
       <span><i style="border-color:rgba(230,237,247,0.55)"></i>not classified</span></div>
-      <p class="dz-hint">Click (or point at) an outline to zoom in on it. Snap / <kbd>O</kbd> hides the overlay.</p>`);
+      <p class="dz-hint">Click (or point at) any outline and the Cosmic Agent tells you what it really is. Snap / <kbd>O</kbd> hides the overlay.</p>`);
   }
 
-  async function focusDetection(r, det, cnn) {
-    const aspect = info.height / info.width, s = Math.max(r[2] * 14, 0.01);
+  // Click an outline: fly to it and let the Cosmic Agent explain what it really is.
+  async function focusDetection(r, det, cnn, el) {
+    const my = token, aspect = info.height / info.width, s = Math.max(r[2] * 14, 0.01);
     viewer.viewport.fitBounds(new OSD.Rect(r[0] - s, r[1] * aspect - s, 2 * s, 2 * s));
-    let body = `<div class="dz-card-k">${det.labels[r[5]].toUpperCase()} · ${(r[2] * info.width * 2).toFixed(0)} px</div>`;
-    if (cnn) {
-      const c = await fetch(`/api/detections/${r[9]}/cnn`).then((x) => x.json()).catch(() => null);
-      if (c?.available) body += `<div class="cnn-box"><div class="cnn-head">OUR CNN · ${c.model}</div>${cnnBars(c.top)}</div>`;
-    }
-    card(body + '<p class="dz-hint">Zoom out to see the whole image again.</p>');
+    root.querySelectorAll('.dz-ell.sel').forEach((e) => e.classList.remove('sel'));
+    el?.classList.add('sel');
+    card(`<div class="dz-agent-head"><i class="dz-orb"></i>COSMIC AGENT · looking at it…</div>`);
+    const x = await fetch(`/api/explain/detection/${r[9]}`).then((q) => q.json()).catch(() => null);
+    if (my !== token) return;
+    if (!x?.verdict) { card('<p>The agent could not read this object.</p>'); return; }
+    const v = x.verdict, f = x.facts, d = f.detection, im = f.image;
+    const facts = [
+      ['Size', d.size_arcsec ? `≈${d.size_arcsec >= 10 ? d.size_arcsec.toFixed(0) : d.size_arcsec.toFixed(1)}″ (${d.size_px.toFixed(0)} px)` : `${d.size_px.toFixed(0)} px`],
+      ['Light profile', d.concentration == null ? '—' : `${d.concentration.toFixed(1)} ${d.concentration < 2.5 ? '(flat)' : d.concentration > 6 ? '(peaked core)' : ''}`],
+      ['Seen in', `${im.telescope} ${im.filter}${im.wavelength ? ` · ${im.wavelength}` : ''}`],
+      ['Shape', `ellipticity ${d.ellipticity}`],
+    ];
+    card(`
+      <div class="dz-agent-head"><i class="dz-orb"></i>COSMIC AGENT</div>
+      <div class="dz-verdict ${v.kind}"><b>${v.label}</b><span>confidence: ${v.confidence}</span></div>
+      <ul class="dz-why">${v.why.map((w) => `<li>${w}</li>`).join('')}</ul>
+      ${x.narrative ? `<p class="dz-narr">${x.narrative.text}</p><p class="dz-hint">Written by ${x.narrative.model} from the measurements on this card.</p>` : ''}
+      ${x.knowledge ? `<div class="dz-know"><div class="dz-card-k">${x.knowledge.title.toUpperCase()}</div><p>${x.knowledge.text}</p></div>` : ''}
+      ${f.cnn ? `<div class="cnn-box"><div class="cnn-head">OUR CNN · ${v.kind === 'nebula' || v.kind === 'star' ? 'galaxy shapes only' : 'galaxy shape'}</div>${cnnBars(f.cnn.top)}</div>` : ''}
+      <div class="dz-facts">${facts.map(([k, val]) => `<span>${k}</span><b>${val}</b>`).join('')}</div>
+      ${im.band_note ? `<p class="dz-hint">${im.wavelength}: ${im.band_note}.${im.emission_line ? ` This filter isolates ${im.emission_line}.` : ''}</p>` : ''}
+      ${im.field ? `<p class="dz-hint">Field: ${im.field}.</p>` : ''}
+      ${!x.claude_available ? '<p class="dz-hint">Built-in knowledge. Set ANTHROPIC_API_KEY on the server and Claude writes a fuller explanation from these facts.</p>' : ''}`);
   }
 
   async function skyOverlays(my) {

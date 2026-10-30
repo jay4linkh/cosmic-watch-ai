@@ -332,3 +332,26 @@ body.deepzoom #agent, body.deepzoom #hud, body.deepzoom #labels { display: none 
   .dz-toggle, .dz-kicker { display: none; }
   .dz-scale { bottom: 12px; left: 16px; }
 }
+
+/* the Cosmic Agent explaining a clicked object (deep zoom) */
+.dz-agent-head { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 10px; letter-spacing: .16em; color: var(--violet); margin-bottom: 8px; }
+.dz-orb { width: 16px; height: 16px; border-radius: 50%; background: radial-gradient(circle at 35% 35%, #fff, #a78bfa 45%, #f472b6 80%); box-shadow: 0 0 12px rgba(167,139,250,.7); }
+.dz-verdict { padding: 9px 11px; border-radius: 10px; border: 1px solid var(--line-2); background: rgba(148,182,255,.06); margin-bottom: 8px; }
+.dz-verdict b { display: block; font-size: 14px; color: var(--ink); }
+.dz-verdict span { font-family: var(--mono); font-size: 10px; color: var(--ink-3); }
+.dz-verdict.nebula { border-color: rgba(251,191,36,.55); background: rgba(251,191,36,.08); }
+.dz-verdict.star { border-color: rgba(253,224,71,.5); }
+.dz-verdict.artifact { border-color: rgba(148,163,184,.6); }
+.dz-verdict.merger { border-color: rgba(244,114,182,.55); background: rgba(244,114,182,.07); }
+.dz-verdict.spiral { border-color: rgba(103,232,249,.55); background: rgba(103,232,249,.06); }
+.dz-verdict.elliptical { border-color: rgba(251,191,36,.45); }
+.dz-verdict.edge-on { border-color: rgba(167,139,250,.55); }
+.dz-why { margin: 6px 0 8px; padding-left: 16px; font-size: 12px; line-height: 1.45; }
+.dz-why li { margin: 3px 0; }
+.dz-narr { font-size: 12.5px; color: var(--ink); }
+.dz-know { margin: 8px 0; padding: 9px 11px; border-radius: 10px; background: rgba(167,139,250,.06); border: 1px solid rgba(167,139,250,.22); }
+.dz-know p { margin: 4px 0 0; font-size: 12px; }
+.dz-facts { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 11.5px; margin: 8px 0; }
+.dz-facts span { color: var(--ink-3); }
+.dz-facts b { font-weight: 500; }
+.dz-ell.sel > i { border-width: 3px; box-shadow: 0 0 14px currentColor, 0 0 6px rgba(0,0,0,.6); }
