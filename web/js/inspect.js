@@ -229,6 +229,82 @@ function animateBH(g, dt, t, e) {
   }
 }
 
+// ---------- gravitational waves: a compact binary merging ----------
+
+function compactBody(type, r) {
+  const g = new THREE.Group();
+  if (type === 'bh') {
+    g.add(new THREE.Mesh(new THREE.SphereGeometry(r, 48, 32), new THREE.MeshBasicMaterial({ color: 0x000000 })));
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(r * 1.12, r * 0.05, 12, 96), new THREE.MeshBasicMaterial({ color: 0xffd9a0 }));
+    ring.userData.billboard = true;
+    g.add(ring, glowSprite(0xff9a50, r * 6, 0.35));
+  } else {
+    g.add(new THREE.Mesh(new THREE.SphereGeometry(r * 0.75, 48, 32), new THREE.MeshBasicMaterial({ color: 0xdff4ff })));
+    g.add(glowSprite(0x7dd3fc, r * 7, 0.8), glowSprite(0xffffff, r * 2.5, 0.9));
+  }
+  return g;
+}
+
+function rippleMaterial(color) {
+  return new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, wireframe: true,
+    uniforms: { uTime: { value: 0 }, uAmp: { value: 0.3 }, uK: { value: 1.2 }, uColor: { value: new THREE.Color(color) } },
+    vertexShader: /* glsl */`
+      uniform float uTime, uAmp, uK; varying float vR; varying float vH;
+      void main() {
+        vec3 p = position; float r = length(p.xy); vR = r;
+        float wave = uAmp * sin(uK * r - uTime) / (1.0 + 0.18 * r);
+        float well = -5.0 / (1.0 + 0.06 * r * r);            // spacetime curved by the masses
+        p.z = wave + well; vH = wave;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+      }`,
+    fragmentShader: /* glsl */`
+      uniform vec3 uColor; varying float vR; varying float vH;
+      void main() { float a = clamp(1.0 - vR / 34.0, 0.0, 1.0) * (0.25 + abs(vH) * 0.5); gl_FragColor = vec4(uColor * (0.6 + abs(vH)), a); }`,
+  });
+}
+
+function gwModel(cls, seed) {
+  const g = new THREE.Group();
+  const types = cls === 'BNS' ? ['ns', 'ns'] : cls === 'NSBH' ? ['bh', 'ns'] : ['bh', 'bh'];
+  const r = rng(seed);
+  const m1 = 1.0, m2 = 0.55 + r() * 0.4;
+  const a = compactBody(types[0], 1.7), b = compactBody(types[1], 1.7 * (types[1] === 'ns' ? 0.8 : m2));
+  const merged = compactBody(types.includes('bh') ? 'bh' : 'ns', 2.1);
+  const flash = glowSprite(0xffffff, 30, 0);
+  const grid = new THREE.Mesh(new THREE.PlaneGeometry(70, 70, 160, 160), rippleMaterial(BH_COLOR[cls] ? 0xa78bfa : 0x8b5cf6));
+  grid.rotation.x = -Math.PI / 2;
+  grid.position.y = -3;
+  g.add(a, b, merged, flash, grid);
+  g.userData.gw = { a, b, merged, flash, grid, m1, m2, period: 9 + r() * 2 };
+  return g;
+}
+
+// inspiral (orbit shrinks, speeds up: the "chirp"), merger flash, ringdown
+function animateGW(g, dt, t, e) {
+  const u = g.userData.gw;
+  const p = (t % u.period) / u.period, P = 0.78;
+  const amp = u.grid.material.uniforms.uAmp;
+  u.grid.material.uniforms.uTime.value += dt * (3 + 14 * Math.pow(Math.min(p / P, 1), 3));
+  if (p < P) {
+    const x = p / P, d = 8 * Math.pow(1 - x, 0.25) + 0.6;
+    const ang = -8 * Math.pow(1 - x, 0.625) * 6;
+    const tot = u.m1 + u.m2;
+    u.a.position.set(Math.cos(ang) * d * u.m2 / tot, 0, Math.sin(ang) * d * u.m2 / tot);
+    u.b.position.set(-Math.cos(ang) * d * u.m1 / tot, 0, -Math.sin(ang) * d * u.m1 / tot);
+    u.a.visible = u.b.visible = true;
+    u.merged.visible = false;
+    amp.value = (0.25 + 2.2 * Math.pow(x, 3)) * (1 + e);
+    u.flash.material.opacity = 0;
+  } else {
+    const y = (p - P) / (1 - P);
+    u.a.visible = u.b.visible = false;
+    u.merged.visible = true;
+    amp.value = 2.4 * Math.exp(-y * 5) * (1 + e);                 // ringdown
+    u.flash.material.opacity = Math.max(0, 0.9 - y * 3);
+  }
+}
+
 // ---------- inspector ----------
 
 export function createInspector(ctx) {
@@ -262,6 +338,7 @@ export function createInspector(ctx) {
   function buildModel(tg) {
     const seed = tg.seed || 1;
     if (tg.kind === 'bh') return bhModel(tg.cls, seed);
+    if (tg.kind === 'gw') return gwModel(tg.cls, seed);
     if (tg.shape === 'star') return starModel();
     if (tg.shape === 'merger') return mergerModel(seed);
     const wrap = new THREE.Group();
@@ -297,7 +374,7 @@ export function createInspector(ctx) {
       const tex = await loadTexture(tg.imageUrl);
       if (my !== token) { tex.dispose(); return; }
       const aspect = tex.image.height / tex.image.width;
-      const w = tg.kind === 'bh' ? 15 : 10, h = w * aspect;
+      const w = tg.kind === 'galaxy' ? 10 : 15, h = w * aspect;
       card = new THREE.Group();
       const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, color: 0xb0b0b0, side: THREE.DoubleSide }));
       const frame = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(w * 1.03, h * 1.03)),
@@ -311,7 +388,7 @@ export function createInspector(ctx) {
       cTag.position.set(0, -h / 2 - 1.6, 0);
       card.add(cTag);
       tags.push(cTag);
-      card.position.set(tg.kind === 'bh' ? 15 : 12.5, 1, -1);
+      card.position.set(tg.kind === 'galaxy' ? 12.5 : 15, 1, -1);
       card.userData.side = card.position.clone();
       group.add(card);
     } catch { /* image is optional; the model still shows */ }
@@ -352,6 +429,7 @@ export function createInspector(ctx) {
     update(dt, t, e) {
       if (!model) return;
       if (model.userData.parts) animateBH(model, dt, t, e);
+      if (model.userData.gw) animateGW(model, dt, t, e);
       if (model.userData.spinners) model.userData.spinners.forEach((s, k) => { s.rotation.y += dt * (k ? -0.16 : 0.12); });
       if (model.userData.inner) {
         model.userData.inner.rotation.y += dt * 0.12;
@@ -374,7 +452,7 @@ export function createInspector(ctx) {
         const [w, h] = card.userData.size;
         const fillH = 2 * D * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2), fillW = fillH * cam.aspect;
         // galaxies cover the screen; 3-panel alert stamps fit inside it
-        const full = target.kind === 'bh' ? Math.min(fillW / w, fillH / h) * 0.96 : Math.max(fillW / w, fillH / h) * 1.02;
+        const full = target.kind === 'galaxy' ? Math.max(fillW / w, fillH / h) * 1.02 : Math.min(fillW / w, fillH / h) * 0.96;
         card.scale.setScalar((1 + Math.min(e, 0.45) * 0.6) * (1 - f) + full * f);
         tmpQ.setFromEuler(tilt);
         const facing = cam.quaternion.clone().multiply(tmpQ);

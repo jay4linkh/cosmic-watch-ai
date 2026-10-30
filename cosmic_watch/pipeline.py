@@ -12,8 +12,9 @@ import traceback
 from . import anomaly, db
 from .config import INTERVALS, RUBIN_STAMPS_PER_CLASS, STAMP_DIR
 from .detectors import galaxies, stamps, sun
-from .fetchers import alerts, mast, sdo
+from .fetchers import alerts, gcn, gw, mars, mast, neo, sdo, spaceweather
 from .ml import infer as cnn
+from .ml import mars as mars_cv
 
 log = logging.getLogger("cosmic_watch")
 
@@ -114,7 +115,50 @@ def run_alerts(con) -> int:
     return n_new
 
 
-SOURCES = {"sdo": run_sdo, "mast": run_mast, "alerts": run_alerts}
+def run_spacewx(con) -> int:
+    db.put_feed(con, "spacewx", spaceweather.fetch())
+    return 1
+
+
+def run_gw(con) -> int:
+    _, old = db.get_feed(con, "gw")
+    known = {e["id"]: e for e in (old or {}).get("events", [])}
+    snap = gw.fetch(known)
+    db.put_feed(con, "gw", snap)
+    return len([e for e in snap["events"] if e["id"] not in known])
+
+
+def run_gcn(con) -> int:
+    _, old = db.get_feed(con, "gcn")
+    known = (old or {}).get("circulars", {})
+    snap = gcn.fetch(known)
+    db.put_feed(con, "gcn", snap)
+    return len(set(snap["circulars"]) - set(known))
+
+
+def run_neo(con) -> int:
+    snap = neo.fetch()
+    db.put_feed(con, "neo", snap)
+    return len(snap["approaches"])
+
+
+def run_mars(con) -> int:
+    n = 0
+    for rec in mars.fetch(lambda src, oid: db.image_exists(con, src, oid)):
+        try:
+            stats = mars_cv.analyse(rec["path"]) or {}
+        except Exception as e:              # CV is an extra; keep the image
+            log.warning("Mars CV failed on %s: %s", rec["external_id"], e)
+            stats = {}
+        stats.update(rec["meta"])
+        db.insert_image(con, rec, None, stats, [])
+        log.info("Mars %s: %s", rec["title"], stats.get("scene", "-"))
+        n += 1
+    return n
+
+
+SOURCES = {"sdo": run_sdo, "mast": run_mast, "alerts": run_alerts, "spacewx": run_spacewx, "gw": run_gw,
+           "gcn": run_gcn, "mars": run_mars, "neo": run_neo}
 
 
 RETRY_AFTER_ERROR_S = 120
@@ -147,7 +191,7 @@ def next_delay(name: str, ok: bool) -> float:
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--once", action="store_true", help="run each source once and exit")
-    ap.add_argument("--only", default=",".join(SOURCES), help="comma-separated: sdo,mast,alerts")
+    ap.add_argument("--only", default=",".join(SOURCES), help="comma-separated: " + ",".join(SOURCES))
     args = ap.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")

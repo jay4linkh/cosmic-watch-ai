@@ -1,6 +1,6 @@
 // Black Hole Watch: live TDE / AGN / QSO / Blazar candidates orbiting an accretion disk.
 import * as THREE from 'three';
-import { api, loadTexture, glowPointsMaterial, pointGeometry, glowSprite, label, fmt, timeAgo, disposeTree } from '../fx.js';
+import { api, loadTexture, glowPointsMaterial, pointGeometry, glowSprite, label, fmt, timeAgo, disposeTree, esc } from '../fx.js';
 
 const CLASS_COLOR = { TDE: 0xff4d8d, AGN: 0x8b5cf6, QSO: 0x38bdf8, Blazar: 0xfbbf24 };
 const CLASS_INFO = {
@@ -10,6 +10,36 @@ const CLASS_INFO = {
   Blazar: 'Blazar: a black-hole jet pointed straight at Earth',
 };
 const FILTERS = ['All', 'TDE', 'AGN', 'QSO', 'Blazar'];
+
+// gravitational waves (LIGO/Virgo/KAGRA) and GCN bursts
+const GW_COLOR = { BBH: 0x8b5cf6, BNS: 0x38bdf8, NSBH: 0xf472b6, Terrestrial: 0x6b7a93 };
+const GW_INFO = {
+  BBH: 'Two black holes spiralled together and merged into one; the collision shook spacetime itself',
+  BNS: 'Two neutron stars collided: the kind of crash that makes gold and can flash in light too',
+  NSBH: 'A black hole swallowed a neutron star',
+  Terrestrial: 'Possibly noise on Earth rather than a cosmic event',
+};
+const GCN_ICON = { grb: '💥', xray: '✴️', neutrino: '🧊', gw: '〰️', frb: '📡', optical: '✨', transient: '•', other: '•' };
+const ly = (mpc) => (mpc == null ? '—' : mpc * 3.262 >= 1000 ? `${(mpc * 3.262 / 1000).toFixed(1)} billion ly` : `${Math.round(mpc * 3.262)} million ly`);
+const seedOf = (str) => [...String(str)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % 1e6 || 1;
+
+function gwTarget(e) {
+  const cls = e.class || 'unknown';
+  const p = e.classification?.[cls];
+  const far = e.far_per_year ? (e.far_per_year < 1 ? `1 per ${fmt(Math.round(1 / e.far_per_year))} years` : `${e.far_per_year.toFixed(1)} per year`) : '—';
+  return {
+    key: `gw:${e.id}`, kind: 'gw', cls, seed: seedOf(e.id), color: GW_COLOR[cls] || 0xa78bfa,
+    short: e.id, badge: cls,
+    kicker: 'GRAVITATIONAL WAVES · LIGO / VIRGO / KAGRA · INSPECT',
+    title: e.id,
+    sub: `${GW_INFO[cls] || 'A gravitational-wave event; its type is not public'}. Right: the real sky map (the detectors hear the whole sky at once, so the patch it came from is huge). Left: a 3D model of the merger: the ripples are the waves themselves.`,
+    stats: [['Type', `${cls}${p ? ` · ${Math.round(p * 100)}%` : ''}`], ['Distance', ly(e.distance_mpc)], ['Detected', `${e.time.slice(0, 10)}`],
+            ['Detectors', e.instruments || '—'], ['False alarms', far], ['Alert', e.alert_stage || '—']],
+    imageUrl: e.skymap_url, imageNote: 'LIGO/Virgo/KAGRA sky map: where on the sky the waves came from',
+    modelNote: `${cls === 'BNS' ? 'two neutron stars' : cls === 'NSBH' ? 'black hole + neutron star' : 'two black holes'} spiralling in · illustrative`,
+    gw: e,
+  };
+}
 const MAX_CARDS = 16;
 
 function accretionDisk() {
@@ -50,6 +80,7 @@ export function createBlackHoles(ctx) {
   tilt.add(disk);
 
   let all = [];
+  let gw = null, gcn = null;
   let filter = 0;
   let cards = [];
   const cardsGroup = new THREE.Group();
@@ -119,8 +150,58 @@ export function createBlackHoles(ctx) {
     autoRotate: false,
     explodeLabel: 'Orbit spread',
     async load() {
-      all = await api('/api/alerts?bh=true&limit=120');
+      [all] = await Promise.all([api('/api/alerts?bh=true&limit=120'), this.refreshPanel()]);
       await build();
+    },
+    async refreshPanel() {
+      const [g, c] = await Promise.all([api('/api/gw').catch(() => null), api('/api/gcn?limit=30').catch(() => null)]);
+      gw = g || gw; gcn = c || gcn;
+    },
+    panel() {
+      const ev = gw?.events || [];
+      const idle = ev.length && (Date.now() - Date.parse(ev[0].time)) / 864e5 > 30;
+      return `
+        <div class="feed-k">GRAVITATIONAL WAVES · LIGO / VIRGO / KAGRA</div>
+        <p class="feed-dim small">${gw ? `${fmt(gw.total_significant)} significant real events in the public catalogue. ` : ''}${idle
+          ? `The detectors are between observing runs (O4 ended in Nov 2025); new events appear here automatically when the next run starts.` : ''}</p>
+        <div class="feed-list">${ev.slice(0, 12).map((e) => `
+          <button class="feed-item" data-act="gw" data-id="${e.id}">
+            <span class="chip" style="--c:#${(GW_COLOR[e.class] || 0xa78bfa).toString(16).padStart(6, '0')}">${e.class || '?'}</span>
+            <b>${e.id}</b><small>${e.time.slice(0, 10)} · ${ly(e.distance_mpc)}</small></button>`).join('') || '<p class="feed-dim">Loading…</p>'}</div>
+        <div class="feed-k" style="margin-top:14px">COSMIC EXPLOSIONS · GCN <span class="feed-time">${timeAgo(gcn?.fetched_at)}</span></div>
+        <p class="feed-dim small">Gamma-ray bursts, X-ray flashes and neutrinos, as reported by observatories worldwide.</p>
+        <div class="feed-list">${(gcn?.events || []).slice(0, 14).map((e) => `
+          <button class="feed-item" data-act="gcn" data-ev="${esc(e.event)}">
+            <span class="chip">${GCN_ICON[e.kind] || '•'} ${esc(e.kind_label.split(' (')[0])}</span>
+            <b>${esc(e.event)}</b><small>${e.n} report${e.n > 1 ? 's' : ''} · ${timeAgo(e.latest)}${e.redshift ? ` · z = ${e.redshift}` : ''}</small></button>`).join('') || '<p class="feed-dim">Loading…</p>'}</div>`;
+    },
+    onPanel(act, el) {
+      if (act === 'gw') this.openGW(el.dataset.id);
+      if (act === 'gcn') this.openGCN(el.dataset.ev);
+    },
+    async openGW(id) {
+      if (!gw) await this.refreshPanel();
+      const ev = gw?.events || [];
+      const e = ev.find((x) => x.id === id);
+      if (!e) return false;
+      const sibs = [e, ...ev.filter((x) => x !== e)].slice(0, 12).map(gwTarget);
+      ctx.inspect({ ...sibs[0], siblings: sibs });
+      return true;
+    },
+    async openGCN(name) {
+      if (!gcn) await this.refreshPanel();
+      const e = (gcn?.events || []).find((x) => x.event === name);
+      if (!e) return false;
+      if (e.ra != null && e.dec != null) {
+        ctx.openDeepZoom({ kind: 'sky', ra: e.ra, dec: e.dec, gcn: e, kicker: `${e.kind_label.toUpperCase()} · GCN · DEEP ZOOM`, title: e.event });
+      } else {
+        ctx.showDetail(`<div class="kicker">${esc(e.kind_label.toUpperCase())} · GCN</div><h3>${esc(e.event)}</h3>
+          <p>${esc(e.explain || '')}</p>${e.redshift ? `<p><b>Redshift z = ${e.redshift}</b></p>` : ''}
+          <div class="feed-sub">Reports (${e.n})</div>
+          <ol class="gcn-list">${e.circulars.slice().reverse().map((c) => `<li><a href="https://gcn.nasa.gov/circulars/${c.id}" target="_blank" rel="noopener">${esc(c.subject)}</a><small>${esc(c.submitter)} · ${timeAgo(c.created)}</small></li>`).join('')}</ol>
+          <p class="feed-dim small">No sky position in the reports yet, so there is no image to open.</p>`);
+      }
+      return true;
     },
     async enter() { if (!all.length) await this.load(); },
     async refresh() {},

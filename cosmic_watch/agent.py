@@ -22,6 +22,16 @@ KIND_NAMES = {
     "tde_candidate": "a black hole shredding a star",
     "classifier_disagreement": "a case where the AI and the classifier disagree",
     "cnn_merger": "a possible galaxy collision (CNN)",
+    "solar_flare": "a strong solar flare",
+    "geomagnetic_storm": "a geomagnetic storm (aurora!)",
+    "cme_candidate": "a possible coronal mass ejection",
+    "gw_event": "gravitational waves from colliding black holes or neutron stars",
+    "gcn_grb": "a gamma-ray burst",
+    "gcn_neutrino": "a high-energy neutrino",
+    "gcn_xray": "an X-ray flash",
+    "gcn_frb": "a fast radio burst",
+    "neo_close": "an asteroid passing inside the Moon's orbit",
+    "mars_feature": "a science find on Mars",
 }
 OPENERS = ["This looks interesting.", "Something caught my eye.", "Have a look at this.", "I found an odd one."]
 

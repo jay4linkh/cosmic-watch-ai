@@ -80,6 +80,11 @@ CREATE TABLE IF NOT EXISTS agent_prefs (   -- Beta(alpha, beta) interest per ano
     alpha REAL NOT NULL DEFAULT 1,
     beta REAL NOT NULL DEFAULT 1
 );
+CREATE TABLE IF NOT EXISTS feeds (       -- latest JSON snapshot of each live feed (space weather, LIGO, GCN, NEOs)
+    key TEXT PRIMARY KEY,
+    fetched_at TEXT NOT NULL,
+    data TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_det_image ON detections(image_id);
 CREATE INDEX IF NOT EXISTS idx_alerts_mjd ON alerts(lastmjd);
 """
@@ -183,3 +188,15 @@ def finish_run(con, run_id: int, status: str, n_new: int = 0, message: str = "")
     con.execute("UPDATE runs SET finished_at=?, status=?, n_new=?, message=? WHERE id=?",
                 (utcnow(), status, n_new, message[:500], run_id))
     con.commit()
+
+
+def put_feed(con, key: str, data) -> None:
+    con.execute("INSERT INTO feeds (key, fetched_at, data) VALUES (?, ?, ?) "
+                "ON CONFLICT (key) DO UPDATE SET fetched_at = excluded.fetched_at, data = excluded.data",
+                (key, utcnow(), json.dumps(data)))
+    con.commit()
+
+
+def get_feed(con, key: str):
+    r = con.execute("SELECT fetched_at, data FROM feeds WHERE key=?", (key,)).fetchone()
+    return (r["fetched_at"], json.loads(r["data"])) if r else (None, None)

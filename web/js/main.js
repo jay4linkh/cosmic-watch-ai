@@ -11,6 +11,8 @@ import { createObservatory } from './views/observatory.js';
 import { createDeep } from './views/deep.js';
 import { createSun } from './views/sun.js';
 import { createBlackHoles } from './views/blackholes.js';
+import { createMars } from './views/mars.js';
+import { createNeo } from './views/neo.js';
 import { createInspector } from './inspect.js';
 import { createDeepZoom } from './deepzoom.js';
 
@@ -70,6 +72,9 @@ const ctx = {
   flyTo: (home, ms) => flyTo(home, ms),
   onInfoChange: () => { renderInfo(); renderItems(); },
   showDetail(html) { $('#detail-body').innerHTML = html; $('#detail').classList.add('open'); },
+  openDeepZoom: (spec) => dz.open(spec),
+  movie: (title, frames, caption) => showMovie(title, frames, caption),
+  currentView: () => current?.name,
 };
 
 const views = {
@@ -77,6 +82,8 @@ const views = {
   deep: createDeep(ctx),
   bh: createBlackHoles(ctx),
   sun: createSun(ctx),
+  mars: createMars(ctx),
+  neo: createNeo(ctx),
 };
 // Only the active view's group is in the scene. (CSS2DRenderer ignores parent visibility,
 // so a merely hidden group would still draw its labels.)
@@ -237,7 +244,49 @@ function renderInfo() {
   $('#inspect-deep').hidden = !(state.inspecting && deepSpec(inspector.target));
   $('#info-legend').innerHTML = (i.legend || []).map(([k, c]) => `<div><i style="background:${c};color:${c}"></i>${k}</div>`).join('');
   renderClassify();
+  renderPanel();
 }
+
+// ---------- live panel (space weather, gravitational waves, Mars, near-Earth objects) ----------
+function renderPanel() {
+  const feed = $('#feed');
+  const html = !state.inspecting && current?.panel ? current.panel() : null;
+  feed.hidden = !html;
+  document.body.classList.toggle('has-feed', !!html);
+  if (html) {
+    const top = feed.scrollTop;
+    feed.innerHTML = html;
+    feed.scrollTop = top;
+  }
+}
+$('#feed').addEventListener('click', (e) => {
+  const el = e.target.closest('[data-act]');
+  if (el && current?.onPanel) current.onPanel(el.dataset.act, el);
+});
+setInterval(async () => {
+  if (!current?.refreshPanel || state.inspecting || dz.isOpen) return;
+  await current.refreshPanel();
+  renderPanel();
+}, 60000);
+
+// A flip-book of consecutive frames (LASCO coronagraph movie).
+let movieTimer = null;
+function showMovie(title, frames, caption) {
+  const lb = $('#lightbox');
+  if (!frames?.length) return;
+  let i = frames.length - 1;
+  lb.querySelector('.lb-body').innerHTML = `<div class="kicker">${title}</div><img class="lb-img" src="${frames[i]}" alt="">
+    <input class="lb-slider" type="range" min="0" max="${frames.length - 1}" value="${i}"><p class="lb-cap">${caption || ''}</p>`;
+  frames.forEach((f) => { const im = new Image(); im.src = f; });          // preload for smooth playback
+  const img = lb.querySelector('.lb-img'), slider = lb.querySelector('.lb-slider');
+  let playing = true;
+  slider.addEventListener('input', () => { playing = false; img.src = frames[+slider.value]; });
+  clearInterval(movieTimer);
+  movieTimer = setInterval(() => { if (!playing) return; i = (i + 1) % frames.length; img.src = frames[i]; slider.value = i; }, 350);
+  lb.hidden = false;
+}
+function closeMovie() { clearInterval(movieTimer); $('#lightbox').hidden = true; }
+$('#lightbox').addEventListener('click', (e) => { if (e.target.id === 'lightbox' || e.target.closest('.lb-close')) closeMovie(); });
 
 // ---------- your classification ----------
 const CLASSES = {
@@ -250,7 +299,7 @@ let labelCount = 0;
 function renderClassify() {
   const box = $('#classify');
   const t = state.inspecting ? inspector.target : null;
-  if (!t) { box.innerHTML = ''; return; }
+  if (!t || !CLASSES[t.kind]) { box.innerHTML = ''; return; }
   const mine = myLabels.get(t.key);
   const ai = t.kind === 'bh' ? t.cls : t.aiLabel;
   box.innerHTML = `
@@ -376,7 +425,7 @@ function zoomCamera(f) {
   camera.position.copy(controls.target).add(off.setLength(len));
 }
 
-const VIEW_ORDER = ['observatory', 'deep', 'bh', 'sun'];
+const VIEW_ORDER = ['observatory', 'deep', 'bh', 'sun', 'mars', 'neo'];
 async function toggleHandMode() {
   if (state.handMode) {
     hands?.stop();
@@ -568,8 +617,13 @@ async function agentLook() {
   const ref = s.ref || {};
   try {
     if (ref.view === 'deep') { await switchView('deep'); await views.deep.openAt(ref.image_id, ref.u, ref.v); }
+    else if (ref.view === 'bh' && ref.gw) { await switchView('bh'); await views.bh.openGW(ref.gw); }
+    else if (ref.view === 'bh' && ref.gcn) { await switchView('bh'); await views.bh.openGCN(ref.gcn); }
     else if (ref.view === 'bh') { await switchView('bh'); await views.bh.openOid(ref.survey, ref.oid); }
-    else if (ref.view === 'sun') { await switchView('sun'); await views.sun.focusOn(ref.channel, ref.x, ref.y); renderItems(); renderInfo(); }
+    else if (ref.view === 'sun' && ref.lasco) { await switchView('sun'); views.sun.showLasco(ref.lasco); }
+    else if (ref.view === 'sun') { await switchView('sun'); if (ref.channel) await views.sun.focusOn(ref.channel, ref.x, ref.y); renderItems(); renderInfo(); }
+    else if (ref.view === 'mars') { await switchView('mars'); await views.mars.openImage(ref.image_id); }
+    else if (ref.view === 'neo') { await switchView('neo'); views.neo.focus(ref.des); }
   } catch (e) { toast(`Couldn't open it: ${e.message}`, '#fb7185'); }
   agentState.current = null;
   setTimeout(agentNext, 12000);       // give you time to look before the next idea
@@ -595,7 +649,7 @@ $('#trace-toggle').addEventListener('click', () => {
 // ---------- keyboard ----------
 addEventListener('keydown', async (e) => {
   if (e.target?.matches?.('input, select')) return;
-  if (['1', '2', '3', '4'].includes(e.key)) switchView(VIEW_ORDER[+e.key - 1]);
+  if (['1', '2', '3', '4', '5', '6'].includes(e.key)) switchView(VIEW_ORDER[+e.key - 1]);
   else if (e.key === 'h' || e.key === 'H') toggleHandMode();
   else if (e.key === ' ') { e.preventDefault(); setExplodeTarget(state.target > 0.5 ? 0 : 1); }
   else if (state.inspecting && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { await inspector.next(e.key === 'ArrowRight' ? 1 : -1); renderInfo(); renderItems(); }
@@ -604,7 +658,7 @@ addEventListener('keydown', async (e) => {
   else if ((e.key === 'z' || e.key === 'Z') && state.inspecting && !dz.isOpen) openDeep();
   else if ((e.key === 'o' || e.key === 'O') && dz.isOpen) dz.toggleOverlay();
   else if ((e.key === 'e' || e.key === 'E') && dz.isOpen) dz.cycleAI();
-  else if (e.key === 'Escape') { if (dz.isOpen) dz.close(); else if (state.inspecting) closeInspect(); else $('#detail').classList.remove('open'); }
+  else if (e.key === 'Escape') { if (!$('#lightbox').hidden) closeMovie(); else if (dz.isOpen) dz.close(); else if (state.inspecting) closeInspect(); else $('#detail').classList.remove('open'); }
 });
 
 // ---------- tour ----------
@@ -721,7 +775,7 @@ function frame() {
   await switchView('observatory');
   setTimeout(() => $('#splash').classList.add('gone'), 250);
   // warm the other views in the background so switching is instant
-  setTimeout(() => { views.deep.load().catch(() => {}); views.bh.load().catch(() => {}); views.sun.load().catch(() => {}); }, 1500);
+  setTimeout(() => { ['deep', 'bh', 'sun', 'mars', 'neo'].forEach((v) => views[v].load().catch(() => {})); }, 1500);
   setInterval(refreshSummary, 20000);
   setTimeout(agentNext, 4000);
   setInterval(() => { if (!agentState.current) agentNext(); }, 30000);

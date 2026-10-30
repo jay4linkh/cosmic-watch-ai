@@ -1,6 +1,6 @@
 // The Sun: the latest SDO image wrapped onto a sphere, with AI-detected regions rising off the surface.
 import * as THREE from 'three';
-import { api, loadTexture, glowPointsMaterial, pointGeometry, glowSprite, label, fmt, timeAgo, disposeTree } from '../fx.js';
+import { api, loadTexture, glowPointsMaterial, pointGeometry, glowSprite, label, fmt, timeAgo, disposeTree, sparkline, esc } from '../fx.js';
 
 const R = 14;
 const CHANNEL = {
@@ -53,9 +53,57 @@ function coronaMaterial(color) {
   });
 }
 
+// ---------- space weather (NOAA SWPC + SOHO LASCO) ----------
+const KP_TEXT = (kp) => (kp == null ? '—' : kp < 4 ? 'quiet' : kp < 5 ? 'active' : `G${Math.min(5, Math.floor(kp) - 4)} storm`);
+const AURORA = (kp) => (kp == null ? '' : kp < 4 ? 'Aurora only near the poles.' : kp < 5 ? 'Aurora possible at high latitudes (Norway, Alaska, Iceland).'
+  : kp < 7 ? 'Aurora may reach Scotland, Canada, northern US and New Zealand.' : 'Aurora possible far from the poles: look north (or south)!');
+const FLARE_LINES = [[1e-7, 'B'], [1e-6, 'C'], [1e-5, 'M'], [1e-4, 'X']];
+
+function spaceWeatherPanel(sw) {
+  if (!sw) return '<div class="feed-k">SPACE WEATHER</div><p class="feed-dim">Waiting for NOAA…</p>';
+  const x = sw.xrays || {}, flares = sw.flares || [], kp = sw.kp?.now, w = sw.wind?.now || {}, reg = sw.regions || {};
+  const count = {};
+  flares.forEach((f) => { count[f.class[0]] = (count[f.class[0]] || 0) + 1; });
+  const big = [...flares].sort((a, b) => (b.flux || 0) - (a.flux || 0)).slice(0, 3);
+  const pr = reg.probabilities || {};
+  const lasco = sw.lasco || {};
+  const now = x.now || {};
+  const level = (now.class || '?')[0];
+  return `
+    <div class="feed-k">SPACE WEATHER · LIVE <span class="feed-time">${timeAgo(sw.fetched_at)}</span></div>
+    <div class="sw-row">
+      <div class="sw-big flare-${level}"><b>${now.class || '—'}</b><span>X-rays now</span></div>
+      <div class="sw-big"><b>${kp?.kp != null ? kp.kp.toFixed(1) : '—'}</b><span>Kp · ${KP_TEXT(kp?.kp)}</span></div>
+      <div class="sw-big ${w.bz != null && w.bz < -5 ? 'warn' : ''}"><b>${w.speed != null ? Math.round(w.speed) : '—'}</b><span>km/s wind</span></div>
+    </div>
+    <div class="feed-sub">GOES X-ray flux, 24 h (flare classes A·B·C·M·X)</div>
+    ${sparkline(x.series, { log: true, min: 1e-8, max: Math.max(1e-5, ...(x.series || []).map((p) => p[1] || 0)), color: '#fbbf24', lines: FLARE_LINES })}
+    <div class="feed-line">24 h peak <b>${x.peak_24h?.class || '—'}</b> · flares this week:
+      ${['X', 'M', 'C', 'B'].map((k) => `<span class="flare-chip flare-${k}">${count[k] || 0} ${k}</span>`).join('')}</div>
+    ${big.length ? `<div class="feed-line feed-dim">Biggest: ${big.map((f) => `${f.class} (${f.max?.slice(5, 16).replace('T', ' ')})`).join(' · ')}</div>` : ''}
+    <div class="feed-sub">Solar wind at L1 · speed (km/s) · magnetic field Bz ${w.bz != null ? `<b class="${w.bz < 0 ? 'neg' : ''}">${w.bz.toFixed(1)} nT</b>` : ''}</div>
+    ${sparkline(sw.wind?.speed_series, { color: '#67e8f9', h: 42 })}
+    ${sparkline(sw.wind?.bz_series, { color: '#f472b6', h: 34, zero: 0 })}
+    <div class="feed-line feed-dim">Density ${w.density != null ? w.density.toFixed(1) : '—'} p/cm³ · ${w.bz != null && w.bz < 0 ? 'Bz south: the wind can couple to Earth\'s field (aurora-friendly).' : 'Bz north: Earth\'s field is mostly shielded.'} ${AURORA(kp?.kp)}</div>
+    <div class="feed-sub">Flare odds, next 24 h (NOAA)</div>
+    <div class="sw-odds"><span>C <b>${pr.c_class_1_day ?? '—'}%</b></span><span>M <b>${pr.m_class_1_day ?? '—'}%</b></span><span>X <b>${pr.x_class_1_day ?? '—'}%</b></span></div>
+    ${(reg.regions || []).length ? `<table class="feed-table"><tr><th>Region</th><th>Where</th><th>Spots</th><th>M %</th><th>X %</th></tr>
+      ${reg.regions.slice(0, 6).map((r) => `<tr><td>AR ${r.region}</td><td>${r.location}</td><td>${r.spots} · ${esc(r.spot_class)}</td><td>${r.p_m ?? '—'}</td><td>${r.p_x ?? '—'}</td></tr>`).join('')}</table>` : ''}
+    <div class="feed-sub">SOHO LASCO coronagraphs: the corona out to 30 Sun-widths. Click for the movie.</div>
+    <div class="lasco-row">${['c2', 'c3'].map((cam) => {
+      const l = lasco[cam];
+      if (!l) return '';
+      const c = l.cme || {};
+      const verdict = c.area_frac >= 0.02 ? `<b class="warn">possible CME, PA ${c.angle_deg}°</b>` : 'no new bright front';
+      return `<button class="lasco-btn" data-act="lasco" data-cam="${cam}"><img src="${l.url}" alt="LASCO ${cam}"><span>${cam.toUpperCase()} · ${timeAgo(l.time)}<br>${verdict}</span></button>`;
+    }).join('')}</div>
+    <p class="feed-dim small">Our CV compares consecutive coronagraph frames (running difference) to catch CMEs.</p>`;
+}
+
 export function createSun(ctx) {
   const group = new THREE.Group();
   let channels = [];
+  let sw = null;
   let index = 0;
   let cur = null;
   const tmp = new THREE.Vector3();
@@ -178,9 +226,20 @@ export function createSun(ctx) {
     autoRotate: false,
     explodeLabel: 'Magnetic loops',
     async load() {
-      const all = await api('/api/sun');
+      const [all] = await Promise.all([api('/api/sun'), this.refreshPanel()]);
       channels = ORDER.map((f) => all.find((c) => c.filter === f)).filter(Boolean);
       await show(0);
+    },
+    async refreshPanel() { try { sw = await api('/api/spacewx'); } catch { /* keep the last one */ } },
+    panel() { return spaceWeatherPanel(sw); },
+    onPanel(act, el) {
+      if (act === 'lasco') this.showLasco(el.dataset.cam);
+    },
+    showLasco(cam) {
+      const l = sw?.lasco?.[cam];
+      if (!l) return;
+      ctx.movie(`SOHO LASCO ${cam.toUpperCase()}`, l.frame_urls,
+        `${cam === 'c2' ? 'C2: 2 to 6 solar radii' : 'C3: 3.7 to 30 solar radii'}. The disc blocks the Sun (white circle = its size) so the faint corona shows. Coronal mass ejections appear as expanding bright clouds.`);
     },
     async enter() { if (!channels.length) await this.load(); },
     update(dt, t, e) {
