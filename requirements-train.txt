@@ -1,0 +1,5 @@
+# training only (GPU): pip install -r requirements-train.txt --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple
+torch
+torchvision
+h5py
+onnx
