@@ -2,6 +2,7 @@
 
     python -m cosmic_watch.ml.train                 # Galaxy10 DECaLS (+ your Inspect labels if any)
     python -m cosmic_watch.ml.train --epochs 3      # quick run
+    python -m cosmic_watch.ml.train --arch zoobot   # v2: Zoobot ConvNeXt (pretrained on Galaxy Zoo)
 
 Data: Galaxy10 DECaLS (17 736 galaxies, 10 classes, labels from Galaxy Zoo volunteers),
 https://astronn.readthedocs.io/en/latest/galaxy10.html , downloaded to data/datasets/galaxy10/.
@@ -14,7 +15,12 @@ contrast stretch (gamma), PSF blur and noise.
 Your own labels from Inspect mode (spiral / elliptical / edge-on / merger) are mixed in with a
 "coarse" loss on the summed probabilities of each group, weighted higher than Galaxy10.
 
-Outputs: models/galaxy_cnn_v1.onnx (+ .json model card with metrics and checksum).
+v2 (--arch zoobot) starts from Zoobot (Walmsley et al.), a ConvNeXt encoder already pretrained on
+hundreds of thousands of Galaxy Zoo galaxies in greyscale, at 224 px; the encoder learns at a
+lower rate than the new head, and validation averages the four 90-degree rotations (galaxies
+have no "up").
+
+Outputs: models/galaxy_cnn_v{1,2}.onnx (+ .json model card with metrics and checksum).
 """
 import argparse
 import hashlib
@@ -33,19 +39,27 @@ from torchvision.models import ResNet18_Weights, resnet18
 
 from ..config import DATA, ROOT
 from .classes import CLASSES, COARSE
-from .cutouts import SIZE, MEAN, STD, cutout
+from .cutouts import MEAN, STD, cutout
 
 H5 = DATA / "datasets" / "galaxy10" / "Galaxy10_DECals.h5"
-CACHE = DATA / "datasets" / "galaxy10" / f"g10_gray_{SIZE}.npz"
 MODEL_DIR = ROOT / "models"
-VERSION = "galaxy_cnn_v1"
 COARSE_NAMES = list(COARSE)
+
+ARCHS = {
+    "resnet18": dict(version="galaxy_cnn_v1", size=128, channels=3, mean=MEAN, std=STD,
+                     epochs=14, batch=96, lr=6e-4, name="ResNet-18 (ImageNet-pretrained), fine-tuned"),
+    "zoobot": dict(version="galaxy_cnn_v2", size=224, channels=1, mean=0.0, std=1.0,
+                   epochs=18, batch=64, lr=1e-3, encoder_lr=2e-4,
+                   hub="hf_hub:mwalmsley/zoobot-encoder-greyscale-convnext_nano",
+                   name="Zoobot greyscale ConvNeXt-nano (pretrained on Galaxy Zoo), fine-tuned"),
+}
 
 
 # ---------- data ----------
 
-def load_galaxy10():
-    """Galaxy10 as grey SIZE x SIZE uint8 (cached after the first run)."""
+def load_galaxy10(size):
+    """Galaxy10 as grey size x size uint8 (cached after the first run)."""
+    CACHE = DATA / "datasets" / "galaxy10" / f"g10_gray_{size}.npz"
     if CACHE.exists():
         z = np.load(CACHE)
         return z["x"], z["y"]
@@ -53,19 +67,19 @@ def load_galaxy10():
     with h5py.File(H5, "r") as f:
         n = f["ans"].shape[0]
         y = f["ans"][:].astype(np.int64)
-        x = np.empty((n, SIZE, SIZE), np.uint8)
+        x = np.empty((n, size, size), np.uint8)
         for s in range(0, n, 512):           # stream: the raw file is 3.5 GB in memory
             chunk = f["images"][s:s + 512]
             for i, img in enumerate(chunk):
                 g = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
-                x[s + i] = cv2.resize(g, (SIZE, SIZE), interpolation=cv2.INTER_AREA)
+                x[s + i] = cv2.resize(g, (size, size), interpolation=cv2.INTER_AREA)
             print(f"  prepared {min(s + 512, n)}/{n}", end="\r")
     np.savez_compressed(CACHE, x=x, y=y)
     print()
     return x, y
 
 
-def load_user_labels():
+def load_user_labels(size):
     """Your Inspect-mode galaxy labels -> (cut-outs, coarse class index)."""
     from .. import db
     con = db.connect()
@@ -82,7 +96,7 @@ def load_user_labels():
         if gray is None:
             continue
         scale = json.loads(r["stats"] or "{}").get("scale", 1.0) or 1.0
-        xs.append(cutout(gray, r["x"] / scale, r["y"] / scale, r["a"] / scale))
+        xs.append(cutout(gray, r["x"] / scale, r["y"] / scale, r["a"] / scale, size=size))
         ys.append(COARSE_NAMES.index(r["label"]))
     return (np.array(xs, np.uint8), np.array(ys, np.int64)) if xs else (None, None)
 
@@ -108,9 +122,9 @@ def augment(img: np.ndarray, rng: np.random.Generator) -> np.ndarray:
 
 
 class Cutouts(Dataset):
-    def __init__(self, x, y, coarse, train, seed=0):
+    def __init__(self, x, y, coarse, train, cfg, seed=0):
         self.x, self.y, self.coarse, self.train = x, y, coarse, train
-        self.seed = seed
+        self.seed, self.cfg = seed, cfg
 
     def __len__(self):
         return len(self.x)
@@ -118,16 +132,30 @@ class Cutouts(Dataset):
     def __getitem__(self, i):
         rng = np.random.default_rng((self.seed, i, int(time.time() * 1000) % 100000)) if self.train else None
         img = augment(self.x[i], rng) if self.train else self.x[i].astype(np.float32) / 255.0
-        t = torch.from_numpy(((img - MEAN) / STD).astype(np.float32))[None].repeat(3, 1, 1)
+        c = self.cfg
+        t = torch.from_numpy(((img - c["mean"]) / c["std"]).astype(np.float32))[None].repeat(c["channels"], 1, 1)
         return t, int(self.y[i]), int(self.coarse[i])
 
 
 # ---------- model ----------
 
-def build_model():
+def build_model(arch):
+    if arch == "zoobot":
+        import timm
+        return timm.create_model(ARCHS[arch]["hub"], pretrained=True, num_classes=len(CLASSES),
+                                 in_chans=1, drop_rate=0.25, drop_path_rate=0.1)
     m = resnet18(weights=ResNet18_Weights.IMAGENET1K_V1)
     m.fc = nn.Sequential(nn.Dropout(0.25), nn.Linear(m.fc.in_features, len(CLASSES)))
     return m
+
+
+def param_groups(model, arch, cfg):
+    """The pretrained encoder learns slower than the freshly initialised head."""
+    if arch != "zoobot":
+        return [{"params": model.parameters(), "lr": cfg["lr"]}]
+    head = [p for n, p in model.named_parameters() if n.startswith("head")]
+    enc = [p for n, p in model.named_parameters() if not n.startswith("head")]
+    return [{"params": enc, "lr": cfg["encoder_lr"]}, {"params": head, "lr": cfg["lr"]}]
 
 
 GROUP = torch.zeros(len(COARSE), len(CLASSES))
@@ -149,12 +177,15 @@ def loss_fn(logits, y, coarse, class_w, smoothing=0.05):
 
 
 @torch.no_grad()
-def evaluate(model, loader, dev):
+def evaluate(model, loader, dev, tta=False):
     model.eval()
     preds, ys = [], []
     for xb, yb, _ in loader:
+        xb = xb.to(dev, non_blocking=True)
         with torch.autocast("cuda", enabled=dev.type == "cuda"):
-            preds.append(model(xb.to(dev, non_blocking=True)).float().softmax(1).cpu())
+            ks = range(4) if tta else range(1)        # average the four 90-degree rotations
+            p = sum(model(torch.rot90(xb, k, (2, 3))).float().softmax(1) for k in ks) / len(ks)
+            preds.append(p.cpu())
         ys.append(yb)
     p, y = torch.cat(preds), torch.cat(ys)
     top = p.argmax(1)
@@ -177,17 +208,25 @@ def evaluate(model, loader, dev):
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--epochs", type=int, default=14)
-    ap.add_argument("--batch", type=int, default=96)
-    ap.add_argument("--lr", type=float, default=6e-4)
+    ap.add_argument("--arch", choices=list(ARCHS), default="resnet18")
+    ap.add_argument("--epochs", type=int)
+    ap.add_argument("--batch", type=int)
+    ap.add_argument("--lr", type=float)
     ap.add_argument("--workers", type=int, default=6)
     args = ap.parse_args(argv)
+    cfg = dict(ARCHS[args.arch])
+    for k in ("epochs", "batch", "lr"):
+        if getattr(args, k) is not None:
+            cfg[k] = getattr(args, k)
+    args.epochs, args.batch, args.lr = cfg["epochs"], cfg["batch"], cfg["lr"]
+    VERSION, SIZE = cfg["version"], cfg["size"]
+    tta = args.arch == "zoobot"
 
     torch.manual_seed(0)
     dev = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"device: {dev} {torch.cuda.get_device_name(0) if dev.type == 'cuda' else ''}")
 
-    x, y = load_galaxy10()
+    x, y = load_galaxy10(SIZE)
     print(f"Galaxy10: {len(x)} images, classes {np.bincount(y).tolist()}")
     rng = np.random.default_rng(0)
     val_idx = np.concatenate([rng.permutation(np.flatnonzero(y == c))[: max(1, int(0.15 * (y == c).sum()))] for c in range(len(CLASSES))])
@@ -195,7 +234,7 @@ def main(argv=None):
     coarse_y = np.array([[i for i, g in enumerate(COARSE.values()) if c in g][0] for c in y])
 
     xtr, ytr, ctr = x[tr_mask], y[tr_mask], coarse_y[tr_mask]
-    ux, uy = load_user_labels()
+    ux, uy = load_user_labels(SIZE)
     n_user = 0 if ux is None else len(ux)
     if n_user:
         # repeat your labels so they matter next to 15k Galaxy10 images
@@ -205,15 +244,16 @@ def main(argv=None):
         ctr = np.concatenate([ctr, np.repeat(uy, rep, 0)])
     print(f"train {len(xtr)} (your labels: {n_user}) · val {len(val_idx)}")
 
-    tr = DataLoader(Cutouts(xtr, ytr, ctr, True), batch_size=args.batch, shuffle=True, num_workers=args.workers,
+    tr = DataLoader(Cutouts(xtr, ytr, ctr, True, cfg), batch_size=args.batch, shuffle=True, num_workers=args.workers,
                     pin_memory=True, persistent_workers=args.workers > 0, drop_last=True)
-    va = DataLoader(Cutouts(x[val_idx], y[val_idx], coarse_y[val_idx], False), batch_size=256, num_workers=2, pin_memory=True)
+    va = DataLoader(Cutouts(x[val_idx], y[val_idx], coarse_y[val_idx], False, cfg), batch_size=128, num_workers=2, pin_memory=True)
 
     counts = np.bincount(y[tr_mask], minlength=len(CLASSES))
     class_w = torch.tensor((counts.max() / counts) ** 0.5, dtype=torch.float32, device=dev)   # gentle re-balancing
-    model = build_model().to(dev).to(memory_format=torch.channels_last)
-    opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=0.05)
-    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=args.lr, total_steps=args.epochs * len(tr), pct_start=0.15)
+    model = build_model(args.arch).to(dev).to(memory_format=torch.channels_last)
+    groups = param_groups(model, args.arch, cfg)
+    opt = torch.optim.AdamW(groups, weight_decay=0.05)
+    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=[g["lr"] for g in groups], total_steps=args.epochs * len(tr), pct_start=0.15)
     scaler = torch.amp.GradScaler(enabled=dev.type == "cuda")
 
     best, best_state, history = -1, None, []
@@ -231,7 +271,7 @@ def main(argv=None):
             scaler.update()
             sched.step()
             run += loss.item(); nb += 1
-        m = evaluate(model, va, dev)
+        m = evaluate(model, va, dev, tta=tta)
         history.append({"epoch": ep, "loss": round(run / nb, 4), **{k: m[k] for k in ("accuracy", "top2_accuracy", "coarse_accuracy")}})
         print(f"epoch {ep:2d}/{args.epochs}  loss {run / nb:.3f}  val acc {m['accuracy']:.3f}  top-2 {m['top2_accuracy']:.3f}  "
               f"coarse {m['coarse_accuracy']:.3f}  ({time.time() - t0:.0f}s)", flush=True)
@@ -247,15 +287,16 @@ def main(argv=None):
     # ONNX for light-weight inference in the pipeline (no PyTorch needed at runtime)
     MODEL_DIR.mkdir(exist_ok=True)
     onnx_path = MODEL_DIR / f"{VERSION}.onnx"
-    torch.onnx.export(model, torch.zeros(1, 3, SIZE, SIZE), onnx_path, input_names=["image"], output_names=["logits"],
+    torch.onnx.export(model, torch.zeros(1, cfg["channels"], SIZE, SIZE), onnx_path, input_names=["image"], output_names=["logits"],
                       dynamic_axes={"image": {0: "n"}, "logits": {0: "n"}}, opset_version=17, dynamo=False)
     sha = hashlib.sha256(onnx_path.read_bytes()).hexdigest()
     card = {
         "version": VERSION, "sha256": sha, "file": onnx_path.name,
-        "architecture": "ResNet-18 (ImageNet-pretrained), fine-tuned", "input": f"grey {SIZE}x{SIZE}, replicated to 3 channels",
-        "normalize": {"mean": MEAN, "std": STD}, "classes": CLASSES, "coarse": COARSE,
+        "architecture": cfg["name"], "input": f"grey {SIZE}x{SIZE}, {cfg['channels']} channel(s)",
+        "size": SIZE, "channels": cfg["channels"], "tta_rotations": 4 if tta else 1,
+        "normalize": {"mean": cfg["mean"], "std": cfg["std"]}, "classes": CLASSES, "coarse": COARSE,
         "data": {"galaxy10_decals": int(len(x)), "train": int(tr_mask.sum()), "val": int(len(val_idx)), "your_labels": n_user},
-        "training": {"epochs": args.epochs, "batch": args.batch, "lr": args.lr, "device": str(dev),
+        "training": {"epochs": args.epochs, "batch": args.batch, "lr": args.lr, "encoder_lr": cfg.get("encoder_lr"), "device": str(dev),
                      "augmentation": "rotation, flip, zoom, gamma stretch, PSF blur, noise (telescope-agnostic, greyscale)"},
         "val_metrics": best_metrics, "history": history,
         "caveats": ("Trained on DECaLS ground-based colour images converted to grey; our live images are JWST/HST "

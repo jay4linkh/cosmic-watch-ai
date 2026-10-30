@@ -3,3 +3,6 @@ torch
 torchvision
 h5py
 onnx
+timm
+huggingface_hub
+safetensors

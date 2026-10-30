@@ -65,6 +65,22 @@ Built with Three.js (WebGL + bloom), served by FastAPI. Four worlds, all from li
 measurements next to the real telescope pixels. Zoom past halfway and the **real image fills the screen** (sharper crops load
 as you zoom; drag or pinch turns it). Then **classify it yourself**; your labels are saved as training data.
 
+**🔭 Deep zoom**: keep zooming past the end of Inspect (or press **Deep zoom** / `Z`) and you drop into the real pixels as a
+**tiled image pyramid** (OpenSeadragon), so zooming in loads sharper tiles instead of stretching one picture:
+
+- **JWST / Hubble**: the full-resolution image, with an astronomical asinh display stretch (brightness only, no new detail)
+  and every galaxy the AI found outlined and coloured by our CNN's call. Click (or point at) one to zoom onto it.
+  Tiles start from MAST's JPEG preview and **upgrade in place to the science mosaic** (JWST `_i2d.fits` / Hubble
+  `_drc.fits`, float32) the first time you deep-zoom an image: same pixel grid, but no JPEG blocks, so the faint sky
+  shows its real grain. The download is 150–300 MB (a few minutes from MAST); the stretched result is cached as a
+  lossless PNG and the FITS is deleted.
+- **Rubin / ZTF alerts**: an alert carries only a tiny cut-out, so the background is the same patch of sky, deep and sharp,
+  from the [DESI Legacy Imaging Surveys](https://www.legacysurvey.org/) (fetched tile by tile and cached). The alert is
+  pinned at its exact position, other alerts in the field show up too, and the **host galaxy** is found and classified by our CNN.
+- A readout always says whether you are looking at real pixels or **beyond native resolution** (smoothly interpolated, no
+  invented detail). Zoom back out past the whole picture to return to 3D. Hand mode: two-hand pinch zooms, open hand
+  keeps zooming in, pinch-drag pans, snap toggles the AI overlay, fist goes back.
+
 Plus a live event trace, source health, a guided tour, and keyboard shortcuts (`1`–`4` views, `Space` explode, `←/→` items, `H` hand mode).
 
 ### ✋ Hand mode
@@ -108,17 +124,31 @@ not. It explores kinds it's unsure about and exploits the ones you keep opening.
 - **Data:** [Galaxy10 DECaLS](https://astronn.readthedocs.io/en/latest/galaxy10.html): 17,736 galaxies labelled by
   Galaxy Zoo volunteers into 10 classes (disturbed, merging, round/in-between/cigar smooth, barred spiral,
   tight/loose spiral, edge-on with/without bulge), **plus your own Inspect-mode labels**.
-- **Model:** ImageNet-pretrained ResNet-18 fine-tuned on grey 128×128 cut-outs (mixed precision on an RTX 3060).
-  Augmentation makes it telescope-agnostic: any rotation, flips, zoom, contrast stretch, PSF blur, noise.
+- **Model v2 (in use):** [Zoobot](https://github.com/mwalmsley/zoobot)'s greyscale ConvNeXt-nano encoder, already
+  pretrained on hundreds of thousands of Galaxy Zoo galaxies, fine-tuned at 224×224 (encoder at a lower learning rate
+  than the new head; mixed precision on an RTX 3060, ~20 min). Predictions average the four 90° rotations.
+- **Model v1:** ImageNet-pretrained ResNet-18 on 128×128 cut-outs (kept for comparison: `--arch resnet18`).
+  Both use telescope-agnostic augmentation: any rotation, flips, zoom, contrast stretch, PSF blur, noise.
+
+  | Validation (2,656 galaxies) | v1 ResNet-18 | **v2 Zoobot ConvNeXt** |
+  |---|---|---|
+  | Accuracy (10 classes) | 82.8 % | **88.7 %** |
+  | Top-2 accuracy | 93.3 % | **97.2 %** |
+  | Coarse (spiral / elliptical / edge-on / merger) | 89.5 % | **92.7 %** |
+  | Recall, hardest classes: disturbed / loose spiral | 38 % / 61 % | **57 % / 78 %** |
+
 - **Your labels** enter through a coarse loss (spiral / elliptical / edge-on / merger) on the summed class probabilities.
-- **Inference:** exported to ONNX (`models/galaxy_cnn_v1.onnx`) and run with ONNX Runtime on CPU, with no PyTorch needed in production.
-  Metrics, classes and the file checksum are in `models/galaxy_cnn_v1.json`.
+- **Inference:** exported to ONNX (`models/galaxy_cnn_v2.onnx`, 60 MB) and run with ONNX Runtime on CPU, with no PyTorch
+  needed in production (~145 ms per galaxy with rotation averaging). The newest model in `models/` is used; set
+  `COSMIC_CNN=galaxy_cnn_v1` to pin the old one. Metrics, classes and checksums are in the `.json` model cards.
+- **Host galaxies:** in deep zoom, the galaxy hosting a Rubin/ZTF alert is classified on Legacy Survey imaging, the same
+  survey Galaxy10 comes from, so there's no domain gap there.
 - **In the app:** Inspect shows the CNN's top-4 probabilities and builds the 3D model from its call (barred spirals get
   a bar, mergers become two colliding disks with tidal tails). The agent flags confident mergers.
 
 ```bash
 pip install -r requirements-train.txt --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple
-python -m cosmic_watch.ml.train      # downloads nothing itself: put Galaxy10_DECals.h5 in data/datasets/galaxy10/
+python -m cosmic_watch.ml.train --arch zoobot   # put Galaxy10_DECals.h5 in data/datasets/galaxy10/ first
 python -m cosmic_watch.ml.infer      # classify all stored images
 ```
 
@@ -135,10 +165,11 @@ python -m cosmic_watch.ml.infer      # classify all stored images
 | Masking: footprint detection, edge rejection, diffraction-spike suppression | `detectors/galaxies.py` |
 | Disk fitting, limb-darkening correction, adaptive thresholding, connected components, morphological opening | `detectors/sun.py` |
 | Image differencing / change detection, robust statistics (median, MAD, σ-clipping) | `detectors/stamps.py`, `anomaly.py` |
-| **Deep learning: our own CNN (ResNet-18 transfer learning) for galaxy morphology** | `ml/train.py`, `ml/infer.py` |
+| **Deep learning: our own CNN (Zoobot ConvNeXt fine-tuned; ResNet-18 baseline) for galaxy morphology, rotation test-time augmentation** | `ml/train.py`, `ml/infer.py` |
 | Unsupervised anomaly detection (Isolation Forest) | `anomaly.py` |
 | Reinforcement learning (Thompson-sampling bandit) | `agent.py` |
 | Deep-learning hand-landmark CNN (MediaPipe), One-Euro filtering, gesture state machine with hysteresis | `web/js/hands.js` |
+| Multi-resolution image pyramids (deep zoom), gnomonic (TAN) sky projection, asinh display stretch | `deepzoom.py`, `web/js/deepzoom.js` |
 | Human-in-the-loop labelling (Galaxy Zoo style) → training data | Inspect mode, `/api/labels` |
 | Third-party ML classifiers (ALeRCE stamp + light-curve classifiers) | alert classes |
 
@@ -160,6 +191,7 @@ cosmic_watch/
 ├── server.py            # FastAPI: JSON API + serves the 3D web app
 ├── anomaly.py           # Sun flares/activity, deep-field outliers, alert disagreements
 ├── agent.py             # the Cosmic Agent: suggestions + bandit learning
+├── deepzoom.py          # tile pyramids (JWST/HST + Legacy Survey sky) + host-galaxy CNN
 ├── fetchers/
 │   ├── alerts.py        # Rubin + ZTF via ALeRCE
 │   ├── mast.py          # JWST + Hubble new releases
@@ -175,6 +207,7 @@ web/                     # 3D observatory (Three.js) + hand tracking (MediaPipe)
     ├── main.js          # app shell, camera, picking, live polling, tour
     ├── hands.js         # webcam hand tracking -> gestures
     ├── inspect.js       # Inspect mode: 3D models + real pixels + full-screen zoom
+    ├── deepzoom.js      # tiled deep-zoom viewer with AI overlays
     ├── fx.js            # glow shaders, starfield, helpers
     └── views/           # observatory · deep · blackholes · sun
 dashboard/app.py         # Streamlit analyst dashboard
@@ -206,4 +239,6 @@ data/                    # downloaded images + database (git-ignored)
 ## Credits
 
 Data: Vera C. Rubin Observatory and ZTF alerts via the ALeRCE broker; JWST and HST data from MAST (STScI);
-solar images courtesy of NASA/SDO and the AIA and HMI science teams.
+solar images courtesy of NASA/SDO and the AIA and HMI science teams; sky backgrounds from the DESI Legacy
+Imaging Surveys (legacysurvey.org). Galaxy CNN v2 starts from [Zoobot](https://github.com/mwalmsley/zoobot)
+(Walmsley et al.), and the deep-zoom viewer is [OpenSeadragon](https://openseadragon.github.io/).

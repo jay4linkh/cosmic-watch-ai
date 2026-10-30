@@ -104,6 +104,7 @@ export function createBlackHoles(ctx) {
               ['AI diff S/N', a.diff_snr != null ? String(Math.round(a.diff_snr)) : '—'],
               ['RA', a.ra.toFixed(4)], ['Dec', `${a.dec >= 0 ? '+' : ''}${a.dec.toFixed(4)}`]],
       imageUrl: a.stamp_url,
+      sky: { ra: a.ra, dec: a.dec, oid: a.oid, survey: a.survey, cls: a.cls, stamp: a.stamp_url },
       imageNote: `${a.survey === 'lsst' ? 'Rubin' : 'ZTF'} alert cut-outs`,
       modelNote: `${MODEL_NOTE[a.cls] || 'black hole'} · illustrative`,
     };

@@ -18,8 +18,9 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import agent, anomaly, db
+from . import agent, anomaly, db, deepzoom
 from .config import DATA, INTERVALS, ROOT
+from .ml import infer as cnn
 from .ml.classes import CLASSES as CNN_CLASSES, COARSE as CNN_COARSE
 
 Image.MAX_IMAGE_PIXELS = None
@@ -55,6 +56,16 @@ async def lifespan(_app):
 
 
 app = FastAPI(title="Cosmic Watch AI", lifespan=lifespan)
+app.include_router(deepzoom.router)
+
+
+@app.middleware("http")
+async def revalidate_app_files(request, call_next):
+    """The web app's own HTML/JS/CSS: always revalidate (ETag), so an update is never stuck in a browser cache."""
+    resp = await call_next(request)
+    if not request.url.path.startswith(("/api/", "/media/", "/thumb/")) and "cache-control" not in resp.headers:
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
 
 
 # ---------- helpers ----------
@@ -234,7 +245,7 @@ def detection_cnn(det_id: int):
     return {"available": True, "label": r[0]["cnn_label"], "conf": r[0]["cnn_conf"],
             "top": [[CNN_CLASSES[i], probs[i]] for i in order[:4]],
             "coarse": {k: round(sum(probs[i] for i in idx), 4) for k, idx in CNN_COARSE.items()},
-            "model": "galaxy_cnn_v1"}
+            "model": cnn.version()}
 
 
 @app.get("/api/images/{image_id}/crop")

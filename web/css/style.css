@@ -26,7 +26,7 @@ kbd { font-family: var(--mono); font-size: 10px; padding: 1px 5px; border: 1px s
 #stage, #labels, #hands, #cam, #cam-shade { position: fixed; inset: 0; width: 100vw; height: 100vh; }
 #stage { display: block; z-index: 1; }
 #labels { z-index: 2; pointer-events: none; }
-#hands { z-index: 3; pointer-events: none; }
+#hands { z-index: 8; pointer-events: none; }
 #cam { z-index: 0; object-fit: cover; transform: scaleX(-1); opacity: 0; transition: opacity .6s; filter: saturate(0.85) brightness(0.8); }
 #cam-shade { z-index: 0; pointer-events: none; opacity: 0; transition: opacity .6s;
   background: radial-gradient(ellipse at center, rgba(2,3,10,0.15), rgba(2,3,10,0.65) 80%); }
@@ -263,3 +263,61 @@ body.inspecting #agent { opacity: 0.9; }
 
 /* a button under your pointing finger */
 .hand-hover { outline: 2px solid var(--cyan) !important; outline-offset: 2px; box-shadow: 0 0 22px rgba(103,232,249,0.6) !important; }
+
+/* ---------- deep zoom ---------- */
+.dz { position: fixed; inset: 0; z-index: 5; background: #000; opacity: 0; pointer-events: none; transition: opacity .45s; }
+.dz.open { opacity: 1; pointer-events: auto; }
+.dz-view { position: absolute !important; inset: 0; width: 100%; height: 100%; }   /* OpenSeadragon sets position: relative */
+body.deepzoom #info, body.deepzoom #trace, body.deepzoom #items, body.deepzoom #inspect-bar, body.deepzoom #detail,
+body.deepzoom #agent, body.deepzoom #hud, body.deepzoom #labels { display: none !important; }
+.dz-top { position: absolute; top: 72px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; z-index: 2;
+  padding: 6px; border-radius: 999px; background: var(--glass); border: 1px solid var(--line); backdrop-filter: blur(14px); white-space: nowrap; max-width: calc(100vw - 32px); }
+.dz-top button { border: 1px solid rgba(103,232,249,0.4); background: rgba(103,232,249,0.1); color: var(--ink); border-radius: 999px; padding: 6px 14px; cursor: pointer; font-size: 12.5px; }
+.dz-toggle { opacity: 0.55; }
+.dz-toggle.on { opacity: 1; border-color: var(--green) !important; background: rgba(74,222,128,0.12) !important; }
+.dz-title { font-size: 13px; overflow: hidden; text-overflow: ellipsis; }
+.dz-kicker { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; color: var(--gold); margin-right: 8px; }
+.dz-card { position: absolute; left: 20px; top: 128px; width: 300px; max-height: calc(100vh - 220px); overflow-y: auto; z-index: 2; padding: 16px;
+  font-size: 12.5px; line-height: 1.5; color: var(--ink-2); opacity: 0; transform: translateX(-12px); transition: all .35s; pointer-events: none; }
+.dz-card.show { opacity: 1; transform: none; pointer-events: auto; }
+.dz-card p { margin: 8px 0; }
+.dz-card b { color: var(--ink); font-weight: 600; }
+.dz-card-k { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; color: var(--gold); margin-bottom: 6px; }
+.dz-hint { font-size: 11.5px; color: var(--ink-3); }
+.dz-stamp { width: 100%; image-rendering: pixelated; border-radius: 8px; border: 1px solid var(--line-2); margin-top: 4px; }
+.dz-stamp-k { display: grid; grid-template-columns: repeat(3, 1fr); text-align: center; font-family: var(--mono); font-size: 9.5px; color: var(--ink-3); letter-spacing: .1em; }
+.dz-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 11px; margin: 8px 0; }
+.dz-legend i { display: inline-block; width: 12px; height: 8px; border: 1.5px solid; border-radius: 50%; margin-right: 5px; vertical-align: middle; }
+.dz-scale { position: absolute; left: 20px; bottom: 20px; z-index: 2; font-family: var(--mono); font-size: 11px; color: var(--ink-3); line-height: 1.7;
+  text-shadow: 0 0 8px #000; pointer-events: none; }
+.dz-res { display: inline-block; padding: 2px 10px; border-radius: 999px; border: 1px solid; }
+.dz-res.native { color: var(--green); border-color: rgba(74,222,128,0.45); background: rgba(74,222,128,0.08); }
+.dz-res.beyond { color: var(--gold); border-color: rgba(251,191,36,0.5); background: rgba(251,191,36,0.08); }
+.dz-credit { font-size: 10px; opacity: .7; }
+.dz-src { font-size: 10.5px; }
+.dz-src.sci { color: var(--green); }
+.dz-loading { position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 2; font-family: var(--mono); font-size: 11px;
+  color: var(--cyan); opacity: 0; transition: opacity .3s; pointer-events: none; }
+.dz-loading.show { opacity: 1; }
+/* AI overlays (positioned by OpenSeadragon) */
+.dz-ell { background: none; border: 0; padding: 0; cursor: pointer; position: relative; }
+.dz-ell > i { position: absolute; inset: 0; border: 1.5px solid; border-radius: 50%; box-shadow: 0 0 6px rgba(0,0,0,.6); transition: border-width .15s; }
+.dz-ell:hover > i, .dz-ell.hand-hover > i { border-width: 2.5px; }
+.dz-ell-tag { position: absolute; left: 50%; top: 100%; margin-top: 3px; transform: translateX(-50%); font-size: 10.5px; color: var(--ink);
+  white-space: nowrap; text-shadow: 0 0 6px #000, 0 0 2px #000; pointer-events: none; }
+.dz-alert { --c: #fff; width: 30px; height: 30px; background: none; border: 0; padding: 0; cursor: pointer; position: relative; }
+.dz-alert > i { position: absolute; inset: 0; border: 2px solid var(--c); border-radius: 50%; box-shadow: 0 0 12px var(--c); }
+.dz-alert.main > i { animation: dzPulse 1.8s ease-out infinite; }
+.dz-alert > span { position: absolute; left: 36px; top: 50%; transform: translateY(-50%); white-space: nowrap; font-size: 12px; color: var(--c);
+  font-family: var(--mono); text-shadow: 0 0 6px #000, 0 0 2px #000; }
+@keyframes dzPulse { 0% { transform: scale(.8); opacity: 1; } 100% { transform: scale(1.9); opacity: 0; } }
+.dz-hostring { border: 1.5px dashed var(--gold); border-radius: 50%; pointer-events: none; box-shadow: 0 0 10px rgba(251,191,36,.35); }
+.dz-host { margin-top: 6px; }
+.inspect-deep { border: 1px solid rgba(74,222,128,0.5); background: rgba(74,222,128,0.12); color: var(--ink); border-radius: 999px; padding: 6px 14px; cursor: pointer; font-size: 12.5px; }
+.inspect-deep[hidden] { display: none; }
+@media (max-width: 720px) {
+  .dz-card { left: 16px; right: 16px; top: auto; bottom: 70px; width: auto; max-height: 34vh; }
+  .dz-top { top: 132px; }
+  .dz-toggle, .dz-kicker { display: none; }
+  .dz-scale { bottom: 12px; left: 16px; }
+}
