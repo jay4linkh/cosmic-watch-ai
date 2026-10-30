@@ -116,6 +116,32 @@ export function createDeep(ctx) {
     }
   }
 
+  // Everything Inspect mode needs to show one detection: model shape + the real pixels.
+  function objectTarget(i, rank) {
+    const { det, meta } = current;
+    const r = det.rows[i], lbl = det.labels[r[5]];
+    const ellip = 1 - r[3] / Math.max(r[2], 1e-6);
+    const shape = lbl === 'star' ? 'star' : (lbl === 'galaxy' && ellip < 0.2) ? 'elliptical' : 'spiral';
+    const sizePx = r[2] * det.width;
+    const c = LABEL_COLORS[lbl] || [1, 1, 1];
+    return {
+      key: `${meta.id}:${i}`,
+      kind: 'galaxy', shape, ellip, theta: r[4], seed: i + 1, aiLabel: lbl,
+      crop: { id: meta.id, u: r[0].toFixed(4), v: r[1].toFixed(4), r: Math.min(0.08, Math.max(0.012, r[2] * 5)) },
+      color: new THREE.Color(...c).getHex(),
+      short: `#${rank} ${lbl}`, badge: fmt(Math.round(r[6])),
+      kicker: `${meta.source.toUpperCase()} · ${meta.target} · INSPECT`,
+      title: `${lbl[0].toUpperCase()}${lbl.slice(1)} #${rank}`,
+      sub: `Found by the AI in this ${meta.source.toUpperCase()} image. Right: the real pixels at full resolution. Left: a 3D model built from its measured size, shape and angle. Zoom in as deep as you like, then classify it yourself.`,
+      stats: [['Brightness (flux)', fmt(Math.round(r[6]))], ['Size', `${sizePx.toFixed(1)} px`],
+              ['Ellipticity', ellip.toFixed(2)], ['Angle', `${Math.round((r[4] * 180) / Math.PI)}°`],
+              ['Position', `${(r[0] * 100).toFixed(1)}%, ${(r[1] * 100).toFixed(1)}%`], ['Model', shape]],
+      imageUrl: `/api/images/${meta.id}/crop?u=${r[0].toFixed(4)}&v=${r[1].toFixed(4)}&r=${Math.min(0.08, Math.max(0.012, r[2] * 5)).toFixed(4)}`,
+      imageNote: `${meta.source.toUpperCase()} ${meta.instrument} · full-resolution close-up`,
+      modelNote: shape === 'star' ? 'foreground star (illustrative)' : `${shape} galaxy · illustrative, from measured shape`,
+    };
+  }
+
   return {
     name: 'deep',
     title: 'Deep Field',
@@ -128,14 +154,26 @@ export function createDeep(ctx) {
     async enter() { if (!list.length) await this.load(); },
     update(dt, t, e) {
       if (Math.abs(e - lastE) > 1e-4 || current?._fresh !== false) { applyExplode(e); lastE = e; if (current) current._fresh = false; }
-      if (current) current.points.material.uniforms.uTime.value = t;
+      if (current) {
+        current.points.material.uniforms.uTime.value = t;
+        current.points.material.uniforms.uScale.value = ctx.handMode ? 380 : 260;   // bigger, brighter over the camera
+      }
     },
     hover(obj, hit) {
       if (!current || hit?.index == null) return null;
       const r = current.det.rows[hit.index];
       return `<b>${current.det.labels[r[5]]}</b><br><span>flux ${fmt(Math.round(r[6]))} · size ${(r[2] * current.det.width).toFixed(1)} px</span>`;
     },
-    pick() {},
+    pick(obj, hit) {
+      if (!current || hit?.index == null) return;
+      // Inspect the clicked source; snap cycles through the field's biggest galaxies.
+      const rows = current.det.rows, labels = current.det.labels;
+      const order = rows.map((r, i) => i).filter((i) => labels[rows[i][5]].includes('galaxy'))
+        .sort((a, b) => rows[b][6] - rows[a][6]).slice(0, 12);
+      if (!order.includes(hit.index)) order.unshift(hit.index);
+      const siblings = order.map((i, k) => objectTarget(i, k + 1));
+      ctx.inspect({ ...siblings[order.indexOf(hit.index)], siblings });
+    },
     items: () => list.map((im) => ({ label: `${im.source.toUpperCase()} · ${im.target}`, sub: `${im.stats.n_galaxies || 0} galaxies` })),
     get itemIndex() { return index; },
     selectItem(i) { return show(i); },

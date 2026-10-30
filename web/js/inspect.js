@@ -1,0 +1,338 @@
+// Inspect mode: dive into one object. A 3D model built from what the AI measured,
+// next to the real telescope pixels it came from.
+//
+// The models are illustrative reconstructions: shape type, size, tilt and angle come
+// from the detection; the internal structure (arms, disk, jets) is generated.
+import * as THREE from 'three';
+import { loadTexture, glowPointsMaterial, pointGeometry, glowSprite, label, disposeTree, fmt } from './fx.js';
+
+// Deterministic random numbers so the same object always gets the same model.
+function rng(seed) {
+  let s = (seed * 2654435761) >>> 0 || 1;
+  return () => { s ^= s << 13; s ^= s >>> 17; s ^= s << 5; return ((s >>> 0) % 1e6) / 1e6; };
+}
+const gauss = (r) => { const u = r() || 1e-6, v = r(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+
+function points(n, scale = 300) {
+  const g = pointGeometry(n);
+  const p = new THREE.Points(g, glowPointsMaterial({ scale }));
+  p.frustumCulled = false;
+  return p;
+}
+
+// ---------- galaxy models ----------
+
+function spiralGalaxy(seed, { arms = 2, wind = 2.6, tint = [0.55, 0.75, 1] } = {}) {
+  const r = rng(seed), N = 14000, pts = points(N, 260);
+  const P = pts.geometry.attributes.position.array, C = pts.geometry.attributes.aColor.array, S = pts.geometry.attributes.aSize.array;
+  const base = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    let x, y, z, col;
+    if (i < N * 0.22) {                         // bulge
+      const rr = Math.abs(gauss(r)) * 1.3;
+      const th = r() * Math.PI * 2, ph = Math.acos(2 * r() - 1);
+      x = rr * Math.sin(ph) * Math.cos(th); z = rr * Math.sin(ph) * Math.sin(th); y = rr * Math.cos(ph) * 0.6;
+      col = [1, 0.86, 0.6];
+    } else {                                    // arms
+      const k = (r() * arms) | 0;
+      const rad = 1 + Math.pow(r(), 0.8) * 9;
+      const th = (k / arms) * Math.PI * 2 + Math.log(rad) * wind + gauss(r) * 0.28;
+      x = Math.cos(th) * rad + gauss(r) * 0.25; z = Math.sin(th) * rad + gauss(r) * 0.25; y = gauss(r) * 0.18;
+      const t = rad / 10;
+      col = [1 - t * (1 - tint[0]), 0.9 - t * (0.9 - tint[1]), 0.75 + t * (tint[2] - 0.75)];
+      if (r() < 0.035) col = [1, 0.45, 0.7];   // star-forming knots
+    }
+    base.set([x, y, z], i * 3); P.set([x, y, z], i * 3); C.set(col, i * 3);
+    S[i] = 0.25 + r() * 0.55 + (i < N * 0.22 ? 0.35 : 0);
+  }
+  pts.userData.base = base;
+  return pts;
+}
+
+function ellipticalGalaxy(seed) {
+  const r = rng(seed), N = 11000, pts = points(N, 260);
+  const P = pts.geometry.attributes.position.array, C = pts.geometry.attributes.aColor.array, S = pts.geometry.attributes.aSize.array;
+  const base = new Float32Array(N * 3);
+  for (let i = 0; i < N; i++) {
+    const rr = Math.pow(r(), 1.8) * 8;
+    const th = r() * Math.PI * 2, ph = Math.acos(2 * r() - 1);
+    const x = rr * Math.sin(ph) * Math.cos(th) * 1.25, y = rr * Math.cos(ph) * 0.8, z = rr * Math.sin(ph) * Math.sin(th);
+    base.set([x, y, z], i * 3); P.set([x, y, z], i * 3);
+    const t = rr / 8;
+    C.set([1, 0.82 - t * 0.2, 0.55 - t * 0.2], i * 3);
+    S[i] = 0.25 + r() * 0.5 + (1 - t) * 0.5;
+  }
+  pts.userData.base = base;
+  return pts;
+}
+
+function starModel() {
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(new THREE.SphereGeometry(1.6, 48, 32), new THREE.MeshBasicMaterial({ color: 0xfff1c9 })));
+  g.add(glowSprite(0xffd27a, 12, 0.8), glowSprite(0xffffff, 5, 0.9));
+  const spikeMat = new THREE.MeshBasicMaterial({ color: 0xfff4d6, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false });
+  for (let k = 0; k < 4; k++) {                 // JWST-style diffraction spikes
+    const s = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 26), spikeMat);
+    s.rotation.z = (k * Math.PI) / 3 + Math.PI / 6;
+    g.add(s);
+  }
+  g.userData.billboard = true;
+  return g;
+}
+
+// ---------- black-hole models ----------
+
+const BH_COLOR = { TDE: 0xff4d8d, AGN: 0x8b5cf6, QSO: 0x38bdf8, Blazar: 0xfbbf24 };
+
+function accretion(seed, { inner = 2.6, outer = 9, n = 12000, hot = 0xfff4d6, mid = 0xffa040, cool = 0xc2185b } = {}) {
+  const r = rng(seed), pts = points(n, 300);
+  const C = pts.geometry.attributes.aColor.array, S = pts.geometry.attributes.aSize.array;
+  const rad = new Float32Array(n), ang = new Float32Array(n), yo = new Float32Array(n);
+  const h = new THREE.Color(hot), m = new THREE.Color(mid), c = new THREE.Color(cool);
+  for (let i = 0; i < n; i++) {
+    rad[i] = inner + Math.pow(r(), 1.5) * (outer - inner); ang[i] = r() * Math.PI * 2; yo[i] = gauss(r) * 0.08 * rad[i] / 4;
+    const t = (rad[i] - inner) / (outer - inner);
+    const col = t < 0.35 ? h.clone().lerp(m, t / 0.35) : m.clone().lerp(c, (t - 0.35) / 0.65);
+    C.set([col.r, col.g, col.b], i * 3);
+    S[i] = 0.3 + r() * 0.5 + (1 - t) * 0.6;
+  }
+  pts.userData = { rad, ang, yo, n };
+  return pts;
+}
+
+function spinDisk(pts, dt, spread = 1) {
+  const { rad, ang, yo, n } = pts.userData;
+  const P = pts.geometry.attributes.position.array;
+  for (let i = 0; i < n; i++) {
+    ang[i] += dt * 6 / Math.pow(rad[i], 1.5);
+    const rr = rad[i] * spread;
+    P[i * 3] = Math.cos(ang[i]) * rr; P[i * 3 + 1] = yo[i] * spread; P[i * 3 + 2] = Math.sin(ang[i]) * rr;
+  }
+  pts.geometry.attributes.position.needsUpdate = true;
+}
+
+function jets(seed, { length = 18, color = 0x9cc8ff, n = 3000, axis = new THREE.Vector3(0, 1, 0) } = {}) {
+  const r = rng(seed + 7), pts = points(n, 300);
+  const C = pts.geometry.attributes.aColor.array, S = pts.geometry.attributes.aSize.array;
+  const life = new Float32Array(n), side = new Float32Array(n), off = new Float32Array(n * 2);
+  const col = new THREE.Color(color);
+  for (let i = 0; i < n; i++) {
+    life[i] = r(); side[i] = i % 2 ? 1 : -1; off[i * 2] = gauss(r); off[i * 2 + 1] = gauss(r);
+    C.set([col.r, col.g, col.b], i * 3); S[i] = 0.3 + r() * 0.6;
+  }
+  pts.userData = { life, side, off, n, length, axis: axis.clone().normalize() };
+  return pts;
+}
+
+function flowJets(pts, dt, spread = 1) {
+  const { life, side, off, n, length, axis } = pts.userData;
+  const P = pts.geometry.attributes.position.array, A = pts.geometry.attributes.aAlpha.array;
+  const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis), v = new THREE.Vector3();
+  for (let i = 0; i < n; i++) {
+    life[i] = (life[i] + dt * 0.35) % 1;
+    const d = 2.4 + life[i] * length * spread, w = 0.15 + life[i] * 1.4;
+    v.set(off[i * 2] * w, d * side[i], off[i * 2 + 1] * w).applyQuaternion(q);
+    P.set([v.x, v.y, v.z], i * 3);
+    A[i] = 1 - life[i];
+  }
+  pts.geometry.attributes.position.needsUpdate = pts.geometry.attributes.aAlpha.needsUpdate = true;
+}
+
+function tidalStream(seed) {
+  const n = 3500, r = rng(seed + 3), pts = points(n, 280);
+  const C = pts.geometry.attributes.aColor.array, S = pts.geometry.attributes.aSize.array;
+  const life = new Float32Array(n), jit = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    life[i] = r(); jit.set([gauss(r) * 0.25, gauss(r) * 0.12, gauss(r) * 0.25], i * 3);
+    const c = new THREE.Color(0xffd0a0).lerp(new THREE.Color(0xff4d8d), r() * 0.6);
+    C.set([c.r, c.g, c.b], i * 3); S[i] = 0.3 + r() * 0.6;
+  }
+  pts.userData = { life, jit, n };
+  return pts;
+}
+
+function bhModel(cls, seed) {
+  const g = new THREE.Group();
+  const horizon = new THREE.Mesh(new THREE.SphereGeometry(2.2, 64, 48), new THREE.MeshBasicMaterial({ color: 0x000000 }));
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(2.45, 0.07, 16, 128), new THREE.MeshBasicMaterial({ color: 0xffe2b0 }));
+  ring.userData.billboard = true;
+  const disk = accretion(seed, cls === 'QSO' ? { outer: 11, n: 16000 } : {});
+  const tilt = new THREE.Group();
+  tilt.rotation.x = cls === 'Blazar' ? 1.25 : 0.32;
+  tilt.add(disk);
+  g.add(horizon, ring, tilt, glowSprite(BH_COLOR[cls] || 0xffa040, cls === 'QSO' ? 30 : 18, cls === 'QSO' ? 0.35 : 0.2));
+  const parts = { disk, tilt };
+  if (cls === 'AGN' || cls === 'QSO' || cls === 'Blazar') {
+    // a blazar's jet points (almost) straight at us
+    const axis = cls === 'Blazar' ? new THREE.Vector3(0.12, 0.25, 1) : new THREE.Vector3(0, 1, 0);
+    parts.jets = jets(seed, { length: cls === 'QSO' ? 30 : cls === 'Blazar' ? 22 : 16, color: cls === 'Blazar' ? 0xffe08a : 0x9cc8ff, axis });
+    g.add(parts.jets);
+  }
+  if (cls === 'TDE') {
+    parts.star = new THREE.Mesh(new THREE.SphereGeometry(0.75, 32, 24), new THREE.MeshBasicMaterial({ color: 0xffe6b0 }));
+    parts.starGlow = glowSprite(0xffc070, 5, 0.7);
+    parts.stream = tidalStream(seed);
+    g.add(parts.star, parts.starGlow, parts.stream);
+  }
+  g.userData.parts = parts;
+  g.userData.cls = cls;
+  return g;
+}
+
+function animateBH(g, dt, t, e) {
+  const { disk, jets: j, star, starGlow, stream } = g.userData.parts;
+  spinDisk(disk, dt, 1 + e * 0.35);
+  if (j) flowJets(j, dt, 1 + e * 0.5);
+  if (star) {
+    // star on an eccentric orbit; its torn-off gas spirals into the disk
+    const a = t * 0.35, rr = 13 - Math.cos(a) * 3;
+    const sp = new THREE.Vector3(Math.cos(a) * rr, Math.sin(a * 0.7) * 1.2, Math.sin(a) * rr * 0.75);
+    star.position.copy(sp); starGlow.position.copy(sp);
+    const { life, jit, n } = stream.userData;
+    const P = stream.geometry.attributes.position.array, A = stream.geometry.attributes.aAlpha.array;
+    for (let i = 0; i < n; i++) {
+      life[i] = (life[i] + dt * 0.18) % 1;
+      const L = life[i], ang = a - L * 4.2, rad = rr * (1 - L) + 2.8 * L;
+      P[i * 3] = Math.cos(ang) * rad + jit[i * 3] * (1 + L * 3);
+      P[i * 3 + 1] = Math.sin(a * 0.7) * 1.2 * (1 - L) + jit[i * 3 + 1];
+      P[i * 3 + 2] = Math.sin(ang) * rad * (0.75 + 0.25 * L) + jit[i * 3 + 2] * (1 + L * 3);
+      A[i] = Math.sin(Math.PI * L);
+    }
+    stream.geometry.attributes.position.needsUpdate = stream.geometry.attributes.aAlpha.needsUpdate = true;
+  }
+}
+
+// ---------- inspector ----------
+
+export function createInspector(ctx) {
+  const group = new THREE.Group();
+  let target = null, model = null, card = null, tags = [];
+  let token = null;
+  let cropStep = 0, cropLoading = false;
+
+  // Zooming in fetches a tighter, sharper crop of the real image (galaxies only).
+  async function refreshCrop(step) {
+    const c = target?.crop;
+    if (!c || !card || cropLoading) return;
+    cropLoading = true;
+    const my = token;
+    const r = Math.max(0.003, c.r * (1 - step * 0.2));
+    try {
+      const tex = await loadTexture(`/api/images/${c.id}/crop?u=${c.u}&v=${c.v}&r=${r.toFixed(4)}&size=768`);
+      if (my !== token || !card) { tex.dispose(); return; }
+      const m = card.userData.mesh.material;
+      m.map?.dispose();
+      m.map = tex;
+      m.needsUpdate = true;
+      cropStep = step;
+    } catch { /* keep the previous crop */ } finally { cropLoading = false; }
+  }
+
+  function buildModel(tg) {
+    const seed = tg.seed || 1;
+    if (tg.kind === 'bh') return bhModel(tg.cls, seed);
+    if (tg.shape === 'star') return starModel();
+    const wrap = new THREE.Group();
+    const inner = tg.shape === 'elliptical' ? ellipticalGalaxy(seed) : spiralGalaxy(seed, { arms: 2 + (seed % 2), wind: 2.2 + (seed % 5) * 0.25 });
+    wrap.add(inner);
+    wrap.add(glowSprite(tg.shape === 'elliptical' ? 0xffc070 : 0xfff0c0, 7, 0.5));
+    // tilt from the measured ellipticity, rotate by the measured position angle
+    const e = tg.shape === 'edge-on' ? 0.92 : (tg.ellip || 0);
+    const tiltAngle = Math.acos(Math.max(0.12, 1 - e));
+    wrap.rotation.set(Math.PI / 2 - tiltAngle, 0, -(tg.theta || 0));
+    wrap.userData.inner = inner;
+    return wrap;
+  }
+
+  async function open(tg) {
+    target = tg;
+    const my = (token = Symbol());
+    clear();
+    model = buildModel(tg);
+    group.add(model);
+    const mTag = label(`<span class="itag-k">3D MODEL</span>${tg.modelNote}`, 'itag');
+    mTag.position.set(0, -11.5, 0);
+    group.add(mTag);
+    tags.push(mTag);
+    ctx.onInfoChange();
+    try {
+      const tex = await loadTexture(tg.imageUrl);
+      if (my !== token) { tex.dispose(); return; }
+      const aspect = tex.image.height / tex.image.width;
+      const w = tg.kind === 'bh' ? 15 : 10, h = w * aspect;
+      card = new THREE.Group();
+      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, color: 0xb0b0b0, side: THREE.DoubleSide }));
+      const frame = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeometry(w * 1.03, h * 1.03)),
+        new THREE.LineBasicMaterial({ color: tg.color || 0x67e8f9 }));
+      card.add(mesh, frame);
+      card.userData.mesh = mesh;
+      cropStep = 0;
+      const cTag = label(`<span class="itag-k" style="color:#4ade80">REAL DATA</span>${tg.imageNote}`, 'itag');
+      cTag.position.set(0, -h / 2 - 1.6, 0);
+      card.add(cTag);
+      tags.push(cTag);
+      card.position.set(tg.kind === 'bh' ? 21 : 17, 1, -2);
+      group.add(card);
+    } catch { /* image is optional; the model still shows */ }
+  }
+
+  function clear() {
+    [model, card].forEach((o) => { if (o) { group.remove(o); disposeTree(o); } });
+    tags.forEach((t) => { group.remove(t); t.element.remove(); });
+    model = card = null; tags = [];
+  }
+
+  return {
+    group,
+    get target() { return target; },
+    open,
+    close() { token = null; clear(); target = null; },
+    next(step = 1) {
+      if (!target?.siblings?.length) return;
+      const s = target.siblings;
+      const i = (s.findIndex((x) => x.key === target.key) + step + s.length) % s.length;
+      return open({ ...s[i], siblings: s });
+    },
+    select(i) { const s = target?.siblings; if (s?.[i]) return open({ ...s[i], siblings: s }); },
+    // Your classification reshapes the model (the real image stays).
+    reshape(shape) {
+      if (!target || target.kind !== 'galaxy') return;
+      target.shape = shape;
+      target.modelNote = shape === 'star' ? 'foreground star · your classification' : `${shape} galaxy · your classification`;
+      if (model) { group.remove(model); disposeTree(model); }
+      model = buildModel(target);
+      group.add(model);
+      const mt = tags[0];
+      if (mt) mt.element.innerHTML = `<span class="itag-k">3D MODEL</span>${target.modelNote}`;
+    },
+    update(dt, t, e) {
+      if (!model) return;
+      if (model.userData.parts) animateBH(model, dt, t, e);
+      if (model.userData.inner) {
+        model.userData.inner.rotation.y += dt * 0.12;
+        const base = model.userData.inner.userData.base, P = model.userData.inner.geometry.attributes.position.array;
+        const k = 1 + e * 0.35;
+        for (let i = 0; i < base.length; i++) P[i] = base[i] * k;
+        model.userData.inner.geometry.attributes.position.needsUpdate = true;
+      }
+      model.traverse((o) => { if (o.userData.billboard) o.quaternion.copy(ctx.camera.quaternion); });
+      if (model.userData.billboard) model.quaternion.copy(ctx.camera.quaternion);
+      if (card) {
+        card.quaternion.slerp(ctx.camera.quaternion, 0.15);
+        card.scale.setScalar(1 + e * 0.5);
+        const step = Math.round(e * 4);
+        if (step !== cropStep) refreshCrop(step);
+      }
+    },
+    items() {
+      return (target?.siblings || []).map((s) => ({ label: s.short, sub: s.badge }));
+    },
+    get itemIndex() { return target?.siblings ? target.siblings.findIndex((x) => x.key === target.key) : -1; },
+    info() {
+      if (!target) return { kicker: '', title: '', sub: '', stats: [] };
+      return { kicker: target.kicker, title: target.title, sub: target.sub, stats: target.stats, links: target.links };
+    },
+  };
+}
+
+export { BH_COLOR, fmt };

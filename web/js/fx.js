@@ -82,8 +82,8 @@ export function makeNebula() {
   const group = new THREE.Group();
   const tex = radialTexture();
   const blobs = [
-    [-260, 120, -420, 520, 0x3b2a8f, 0.35], [300, -80, -460, 600, 0x0e4a6e, 0.32],
-    [60, 220, -520, 480, 0x6b1d5c, 0.22], [-120, -240, -380, 420, 0x12355e, 0.3],
+    [-260, 120, -420, 520, 0x2a2140, 0.12], [300, -80, -460, 600, 0x1a2630, 0.1],
+    [60, 220, -520, 480, 0x3a1830, 0.08], [-120, -240, -380, 420, 0x1c2026, 0.1],
   ];
   for (const [x, y, z, s, c, o] of blobs) {
     const m = new THREE.SpriteMaterial({ map: tex, color: c, transparent: true, opacity: o, depthWrite: false, blending: THREE.AdditiveBlending });
