@@ -216,6 +216,8 @@ def image_info(image_id: int):
     kind = "science" if sci["state"] == "ready" else "preview"
     return {"width": w, "height": h, "tileSize": TILE, "tileOverlap": 1, "maxLevel": _levels(w, h),
             "source": r["source"], "data": kind, "science": sci,
+            "ai": {"available": sr_available(), "models": {k: {"name": v["name"], "note": v["note"]} for k, v in SR_MODELS.items()},
+                   "tiles": f"/api/dz/image/{image_id}/ai/{{model}}/{{x}}_{{y}}.jpg?v={IMG_TILE_VERSION}&d={kind}"},
             "tiles": f"/api/dz/image/{image_id}/{{level}}/{{x}}_{{y}}.jpg?v={IMG_TILE_VERSION}&d={kind}"}
 
 
@@ -250,6 +252,102 @@ def image_tile(image_id: int, level: int, xy: str, d: str = "preview"):
         out.parent.mkdir(parents=True, exist_ok=True)
         q = SCIENCE_Q if entry["kind"] == "science" else JPEG_Q
         cv2.imwrite(str(out), im[y0:y1, x0:x1], [cv2.IMWRITE_JPEG_QUALITY, q])
+    return FileResponse(out, headers={"Cache-Control": "public, max-age=604800"})
+
+
+# ---------- AI enhance: one extra 2x level made by a super-resolution network ----------
+#
+# Past the real resolution the viewer can only interpolate. With AI enhance on, the pyramid
+# gets one more level (2x the real pixel count) whose tiles come from a super-resolution
+# model. That detail is *invented*: plausible, not measured. The viewer labels it, and it
+# never feeds the CNN, the detectors or the anomaly scores.
+
+SR_DIR = DATA / "models" / "sr"
+SR_MODELS = {
+    "swinir": {"file": "swinir_m_x2.pth", "name": "SwinIR ×2",
+               "url": "https://github.com/JingyunLiang/SwinIR/releases/download/v0.0/001_classicalSR_DF2K_s64w8_SwinIR-M_x2.pth",
+               "note": "sharper; stays close to the data", "fp16": False},   # overflows in half precision
+    "esrgan": {"file": "realesrgan_x2plus.pth", "name": "Real-ESRGAN ×2",
+               "url": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth",
+               "note": "cleaner, but smooths away faint sources", "fp16": True},
+}
+SR_PAD = 16              # input context around each tile, so tile edges match
+_sr: dict[str, tuple] = {}
+_sr_lock = threading.Lock()
+
+
+def sr_available() -> bool:
+    try:
+        import spandrel  # noqa: F401
+        import torch  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def _sr_model(key):
+    if key not in _sr:
+        import torch
+        from spandrel import ModelLoader
+        cfg = SR_MODELS[key]
+        path = SR_DIR / cfg["file"]
+        if not path.exists():
+            SR_DIR.mkdir(parents=True, exist_ok=True)
+            part = path.with_suffix(".part")
+            with _http.get(cfg["url"], stream=True, timeout=120) as r:
+                r.raise_for_status()
+                with open(part, "wb") as f:
+                    for chunk in r.iter_content(1 << 20):
+                        f.write(chunk)
+            part.replace(path)
+        dev = "cuda" if torch.cuda.is_available() else "cpu"
+        _sr[key] = (ModelLoader().load_from_file(str(path)).to(dev).eval(), dev)
+    return _sr[key]
+
+
+def _super_resolve(gray, key):
+    """uint8 grey (H, W) -> uint8 grey (2H, 2W)."""
+    import torch
+    model, dev = _sr_model(key)
+    h, w = gray.shape
+    ph, pw = (-h) % 8, (-w) % 8                    # window / stride multiples
+    g = cv2.copyMakeBorder(gray, 0, ph, 0, pw, cv2.BORDER_REFLECT) if ph or pw else gray
+    x = torch.from_numpy(np.repeat(g[None, None].astype(np.float32) / 255.0, 3, 1)).to(dev)
+    with torch.no_grad(), torch.autocast(dev, dtype=torch.float16, enabled=dev == "cuda" and SR_MODELS[key]["fp16"]):
+        y = model(x)
+    out = (torch.nan_to_num(y.float()).clamp(0, 1).mean(1)[0].cpu().numpy() * 255 + 0.5).astype(np.uint8)
+    return out[: 2 * h, : 2 * w]
+
+
+@router.get("/api/dz/image/{image_id}/ai/{model}/{xy}.jpg")
+def image_ai_tile(image_id: int, model: str, xy: str, d: str = "preview"):
+    """A tile of the AI-enhanced level (2x the full-resolution grid). Invented detail: display only."""
+    if model not in SR_MODELS or not sr_available():
+        raise HTTPException(404, "AI enhance is not available on this server")
+    entry = _pyramid(image_id)
+    out = TILE_DIR / f"img-v{IMG_TILE_VERSION}" / f"ai-{model}" / entry["kind"] / str(image_id) / f"{xy}.jpg"
+    if not out.exists():
+        try:
+            x, y = (int(v) for v in xy.split("_"))
+        except ValueError:
+            raise HTTPException(400)
+        full = entry["full"][:, :, 0]
+        H, W = full.shape
+        ox0, oy0 = x * TILE - (1 if x else 0), y * TILE - (1 if y else 0)
+        ox1, oy1 = min(2 * W, (x + 1) * TILE + 1), min(2 * H, (y + 1) * TILE + 1)
+        if ox0 >= 2 * W or oy0 >= 2 * H:
+            raise HTTPException(404)
+        ix0, iy0 = max(0, ox0 // 2 - SR_PAD), max(0, oy0 // 2 - SR_PAD)
+        ix1, iy1 = min(W, -(-ox1 // 2) + SR_PAD), min(H, -(-oy1 // 2) + SR_PAD)
+        crop = full[iy0:iy1, ix0:ix1]
+        if not crop.any():                         # outside the footprint: nothing to invent
+            up = np.zeros((2 * crop.shape[0], 2 * crop.shape[1]), np.uint8)
+        else:
+            with _sr_lock:                         # one GPU job at a time
+                up = _super_resolve(crop, model)
+        tile = up[oy0 - 2 * iy0: oy1 - 2 * iy0, ox0 - 2 * ix0: ox1 - 2 * ix0]
+        out.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(out), tile, [cv2.IMWRITE_JPEG_QUALITY, SCIENCE_Q])
     return FileResponse(out, headers={"Cache-Control": "public, max-age=604800"})
 
 

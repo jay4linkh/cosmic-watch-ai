@@ -603,6 +603,7 @@ addEventListener('keydown', async (e) => {
   else if (e.key === 'ArrowLeft' && current?.selectItem) { await current.selectItem(current.itemIndex - 1); renderItems(); }
   else if ((e.key === 'z' || e.key === 'Z') && state.inspecting && !dz.isOpen) openDeep();
   else if ((e.key === 'o' || e.key === 'O') && dz.isOpen) dz.toggleOverlay();
+  else if ((e.key === 'e' || e.key === 'E') && dz.isOpen) dz.cycleAI();
   else if (e.key === 'Escape') { if (dz.isOpen) dz.close(); else if (state.inspecting) closeInspect(); else $('#detail').classList.remove('open'); }
 });
 

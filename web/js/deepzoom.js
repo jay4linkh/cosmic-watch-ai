@@ -43,6 +43,7 @@ export function createDeepZoom({ onClose, toast }) {
     <div class="dz-top">
       <button class="dz-close">← Back to 3D</button>
       <div class="dz-title"><span class="dz-kicker"></span><b></b></div>
+      <button class="dz-ai" hidden title="Add a super-resolution level past the real pixels (E)">✨ AI enhance: off</button>
       <button class="dz-toggle on" title="Show / hide what the AI found (snap)">AI overlay</button>
     </div>
     <div class="dz-card glass"></div>
@@ -53,9 +54,12 @@ export function createDeepZoom({ onClose, toast }) {
 
   let OSD = null, viewer = null, spec = null, info = null;
   let overlays = [], overlaysOn = true, armed = false, openedAt = 0, token = 0, sciTimer = null;
+  let aiModel = null;              // null | 'swinir' | 'esrgan'
+  const AI_ORDER = [null, 'swinir', 'esrgan'];
 
   $('.dz-close').addEventListener('click', () => close());
   $('.dz-toggle').addEventListener('click', () => toggleOverlay());
+  $('.dz-ai').addEventListener('click', () => cycleAI());
 
   function ensureViewer() {
     if (viewer) return viewer;
@@ -86,11 +90,54 @@ export function createDeepZoom({ onClose, toast }) {
 
   function tileSource(i, minSide = 256) {
     const levels = Math.floor(Math.log2(Math.max(i.width, i.height) / minSide));
+    const real = (l, x, y) => i.tiles.replace('{level}', l).replace('{x}', x).replace('{y}', y);
+    if (aiModel && i.ai?.available) {
+      // Twice the size: levels up to maxLevel are the real tiles unchanged, maxLevel + 1 is AI-made.
+      return {
+        width: i.width * 2, height: i.height * 2, tileSize: i.tileSize, tileOverlap: i.tileOverlap,
+        minLevel: Math.max(0, i.maxLevel - levels), maxLevel: i.maxLevel + 1,
+        getTileUrl: (l, x, y) => (l > i.maxLevel
+          ? i.ai.tiles.replace('{model}', aiModel).replace('{x}', x).replace('{y}', y)
+          : real(l, x, y)),
+      };
+    }
     return {
       width: i.width, height: i.height, tileSize: i.tileSize, tileOverlap: i.tileOverlap,
-      minLevel: Math.max(0, i.maxLevel - levels), maxLevel: i.maxLevel,
-      getTileUrl: (l, x, y) => i.tiles.replace('{level}', l).replace('{x}', x).replace('{y}', y),
+      minLevel: Math.max(0, i.maxLevel - levels), maxLevel: i.maxLevel, getTileUrl: real,
     };
+  }
+
+  // Reopen the same picture with a new tile source, keeping the view where it was.
+  function reopen(my, after) {
+    const bounds = viewer.viewport.getBounds();
+    viewer.addOnceHandler('open', () => {
+      if (my !== token) return;
+      viewer.viewport.fitBounds(bounds, true);
+      viewer.viewport.applyConstraints();      // e.g. AI switched off while zoomed past the real-pixel limit
+      imageOverlays(my);
+      sourceLine();
+      readout();
+      after?.();
+    });
+    viewer.open(tileSource(info));
+  }
+
+  function aiButton() {
+    const b = $('.dz-ai');
+    b.hidden = !(spec?.kind === 'image' && info?.ai?.available);
+    b.classList.toggle('on', !!aiModel);
+    b.textContent = aiModel ? `✨ AI: ${info.ai.models[aiModel].name}` : '✨ AI enhance: off';
+    b.title = aiModel ? `${info.ai.models[aiModel].note}. Click for the next model / off (E)` : 'Add a super-resolution level past the real pixels (E)';
+  }
+
+  function cycleAI() {
+    if (spec?.kind !== 'image' || !info?.ai?.available) return;
+    aiModel = AI_ORDER[(AI_ORDER.indexOf(aiModel) + 1) % AI_ORDER.length];
+    aiButton();
+    reopen(token, () => {
+      if (aiModel) toast?.(`AI enhance on: ${info.ai.models[aiModel].name} (${info.ai.models[aiModel].note}). Zoom past the real pixels to see it; that detail is invented.`, '#f472b6');
+      else toast?.('AI enhance off: real pixels only', '#4ade80');
+    });
   }
 
   // ---------- readout: field of view, and whether we are past the real resolution ----------
@@ -104,13 +151,17 @@ export function createDeepZoom({ onClose, toast }) {
       $('.dz-fov').textContent = `field ${fmtAngle(w / iz * info.arcsec_per_px)} wide · ${(info.arcsec_per_px / iz).toFixed(3)}″ per screen px`;
       setRes(native);
     } else {
-      $('.dz-fov').textContent = `${Math.round((w / iz))} of ${info.width} px across · ${iz >= 1 ? `${iz.toFixed(1)}× magnified` : `1:${(1 / iz).toFixed(1)}`}`;
-      setRes(iz);
+      const k = aiModel && info.ai?.available ? 2 : 1;              // tile source is 2x the real grid with AI on
+      const real = iz * k;                                            // screen px per real pixel
+      $('.dz-fov').textContent = `${Math.round(w / real)} of ${info.width} px across · ${real >= 1 ? `${real.toFixed(1)}× magnified` : `1:${(1 / real).toFixed(1)}`}`;
+      setRes(real, k > 1 ? info.ai.models[aiModel].name : null);
     }
   }
-  function setRes(native) {
+  function setRes(native, ai = null) {
     const r = $('.dz-res');
-    if (native > 1.15) { r.className = 'dz-res beyond'; r.textContent = `beyond native resolution ×${native.toFixed(1)} · smooth interpolation, no new detail`; }
+    root.classList.toggle('ai-active', !!ai && native > 1.15);
+    if (ai && native > 1.15) { r.className = 'dz-res ai'; r.textContent = `AI-enhanced (${ai}) ×${native.toFixed(1)} · invented detail, not measured`; }
+    else if (native > 1.15) { r.className = 'dz-res beyond'; r.textContent = `beyond native resolution ×${native.toFixed(1)} · smooth interpolation, no new detail`; }
     else { r.className = 'dz-res native'; r.textContent = native > 0.85 ? 'native resolution · every pixel real' : 'real pixels · zoom for more detail'; }
   }
 
@@ -223,16 +274,8 @@ export function createDeepZoom({ onClose, toast }) {
     if (info.science.state === 'ready') {
       const fresh = await fetch(`/api/dz/image/${spec.imageId}`).then((r) => r.json());
       if (my !== token) return;
-      const bounds = viewer.viewport.getBounds();
       info = fresh;
-      viewer.addOnceHandler('open', () => {
-        if (my !== token) return;
-        viewer.viewport.fitBounds(bounds, true);
-        imageOverlays(my);
-        sourceLine();
-        toast?.('Switched to the science data: uncompressed JWST/Hubble pixels', '#4ade80');
-      });
-      viewer.open(tileSource(info));
+      reopen(my, () => toast?.('Switched to the science data: uncompressed JWST/Hubble pixels', '#4ade80'));
       return;
     }
     if (info.science.state !== 'failed') sciTimer = setTimeout(() => upgradeToScience(my), 4000);
@@ -245,6 +288,8 @@ export function createDeepZoom({ onClose, toast }) {
     const my = ++token;
     spec = s;
     armed = false;
+    aiModel = null;
+    $('.dz-ai').hidden = true;
     root.classList.add('open');
     document.body.classList.add('deepzoom');
     $('.dz-kicker').textContent = s.kicker || '';
@@ -274,6 +319,7 @@ export function createDeepZoom({ onClose, toast }) {
           vp.fitBounds(new OSD.Rect((s.u ?? 0.5) - r, (s.v ?? 0.5) * aspect - rh, 2 * r, 2 * rh), true);
           imageOverlays(my);
           upgradeToScience(my);
+          aiButton();
         }
         sourceLine();
         openedAt = performance.now();
@@ -308,7 +354,7 @@ export function createDeepZoom({ onClose, toast }) {
 
   return {
     get isOpen() { return root.classList.contains('open'); },
-    open, close, toggleOverlay,
+    open, close, toggleOverlay, cycleAI,
     // hand / keyboard control
     zoomBy(f) { if (viewer && info) { viewer.viewport.zoomBy(f); viewer.viewport.applyConstraints(); } },
     panBy(dx, dy) {

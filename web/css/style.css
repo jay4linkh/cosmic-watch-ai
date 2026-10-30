@@ -296,6 +296,14 @@ body.deepzoom #agent, body.deepzoom #hud, body.deepzoom #labels { display: none 
 .dz-credit { font-size: 10px; opacity: .7; }
 .dz-src { font-size: 10.5px; }
 .dz-src.sci { color: var(--green); }
+.dz-res.ai { color: var(--pink); border-color: rgba(244,114,182,0.55); background: rgba(244,114,182,0.1); }
+.dz-top .dz-ai { border-color: rgba(244,114,182,0.45); background: rgba(244,114,182,0.08); }
+.dz-top .dz-ai.on { border-color: var(--pink); background: rgba(244,114,182,0.2); color: #fff; }
+.dz-top .dz-ai[hidden] { display: none; }
+/* while the AI level is on screen, frame the whole view so it can't be mistaken for real data */
+.dz.ai-active .dz-view::after { content: 'AI-ENHANCED · INVENTED DETAIL'; position: absolute; inset: 0; pointer-events: none; z-index: 3;
+  box-shadow: inset 0 0 0 2px rgba(244,114,182,0.75), inset 0 0 40px rgba(244,114,182,0.18);
+  font-family: var(--mono); font-size: 10px; letter-spacing: .18em; color: var(--pink); padding: 124px 0 0 0; text-align: center; }
 .dz-loading { position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 2; font-family: var(--mono); font-size: 11px;
   color: var(--cyan); opacity: 0; transition: opacity .3s; pointer-events: none; }
 .dz-loading.show { opacity: 1; }
