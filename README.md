@@ -101,6 +101,31 @@ not. It explores kinds it's unsure about and exploits the ones you keep opening.
 > Why a bandit and not "full" RL? There's no environment to act in or long-horizon reward here, just a choice of
 > what to show next and a yes/no signal from you. That's exactly the contextual-bandit setting.
 
+## 🧠 Our galaxy CNN
+
+`cosmic_watch/ml/` trains our own deep-learning classifier and runs it on every new JWST/Hubble image.
+
+- **Data:** [Galaxy10 DECaLS](https://astronn.readthedocs.io/en/latest/galaxy10.html): 17,736 galaxies labelled by
+  Galaxy Zoo volunteers into 10 classes (disturbed, merging, round/in-between/cigar smooth, barred spiral,
+  tight/loose spiral, edge-on with/without bulge), **plus your own Inspect-mode labels**.
+- **Model:** ImageNet-pretrained ResNet-18 fine-tuned on grey 128×128 cut-outs (mixed precision on an RTX 3060).
+  Augmentation makes it telescope-agnostic: any rotation, flips, zoom, contrast stretch, PSF blur, noise.
+- **Your labels** enter through a coarse loss (spiral / elliptical / edge-on / merger) on the summed class probabilities.
+- **Inference:** exported to ONNX (`models/galaxy_cnn_v1.onnx`) and run with ONNX Runtime on CPU, with no PyTorch needed in production.
+  Metrics, classes and the file checksum are in `models/galaxy_cnn_v1.json`.
+- **In the app:** Inspect shows the CNN's top-4 probabilities and builds the 3D model from its call (barred spirals get
+  a bar, mergers become two colliding disks with tidal tails). The agent flags confident mergers.
+
+```bash
+pip install -r requirements-train.txt --index-url https://download.pytorch.org/whl/cu128 --extra-index-url https://pypi.org/simple
+python -m cosmic_watch.ml.train      # downloads nothing itself: put Galaxy10_DECals.h5 in data/datasets/galaxy10/
+python -m cosmic_watch.ml.infer      # classify all stored images
+```
+
+> Domain shift: training images are ground-based colour DECaLS cut-outs; our live images are single-filter space
+> telescope previews. Expect lower accuracy on JWST/HST than the validation numbers, especially for tiny sources.
+> Your labels are how it gets better on our data.
+
 ## Computer vision & AI used in this project
 
 | Technique | Where |
@@ -110,13 +135,14 @@ not. It explores kinds it's unsure about and exploits the ones you keep opening.
 | Masking: footprint detection, edge rejection, diffraction-spike suppression | `detectors/galaxies.py` |
 | Disk fitting, limb-darkening correction, adaptive thresholding, connected components, morphological opening | `detectors/sun.py` |
 | Image differencing / change detection, robust statistics (median, MAD, σ-clipping) | `detectors/stamps.py`, `anomaly.py` |
+| **Deep learning: our own CNN (ResNet-18 transfer learning) for galaxy morphology** | `ml/train.py`, `ml/infer.py` |
 | Unsupervised anomaly detection (Isolation Forest) | `anomaly.py` |
 | Reinforcement learning (Thompson-sampling bandit) | `agent.py` |
 | Deep-learning hand-landmark CNN (MediaPipe), One-Euro filtering, gesture state machine with hysteresis | `web/js/hands.js` |
 | Human-in-the-loop labelling (Galaxy Zoo style) → training data | Inspect mode, `/api/labels` |
 | Third-party ML classifiers (ALeRCE stamp + light-curve classifiers) | alert classes |
 
-Next step: train our own CNN on Galaxy Zoo + your labels, and an autoencoder for image-level anomalies.
+Next step: an autoencoder for image-level anomalies, and retraining the CNN as your labels grow.
 
 ## Deploy (live link)
 
@@ -165,7 +191,8 @@ data/                    # downloaded images + database (git-ignored)
 - [x] **Phase 4, Live dashboard**
 - [x] **Phase 4b, 3D observatory + hand-gesture control**
 - [x] **Phase 4c, Inspect mode, your own classifications, anomaly detection + learning agent**
-- [ ] **Phase 5, Trained models**: replace the rule-based galaxy labels with a CNN trained on Galaxy Zoo (or Zoobot); our own real/bogus CNN on alert cutouts
+- [x] **Phase 5, Our own CNN galaxy classifier** (Galaxy10 DECaLS + your labels)
+- [ ] **Phase 5b**: our own real/bogus CNN on alert cut-outs
 - [ ] **Phase 6**: gravitational-lens finder, anomaly detection (autoencoder), galaxy similarity search (DINOv2/CLIP)
 - [ ] Rubin via Fink as a second broker (its API was timing out when v0 was built)
 

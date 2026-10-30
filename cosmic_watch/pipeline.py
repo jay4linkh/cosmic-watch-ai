@@ -13,6 +13,7 @@ from . import anomaly, db
 from .config import INTERVALS, RUBIN_STAMPS_PER_CLASS, STAMP_DIR
 from .detectors import galaxies, stamps, sun
 from .fetchers import alerts, mast, sdo
+from .ml import infer as cnn
 
 log = logging.getLogger("cosmic_watch")
 
@@ -46,7 +47,12 @@ def run_mast(con) -> int:
     for rec in mast.fetch(lambda src, oid: db.image_exists(con, src, oid)):
         rgb, dets, stats = galaxies.detect(rec["path"])
         out = galaxies.annotate(rgb, dets, _annotated_path(rec["path"]))
-        db.insert_image(con, rec, out, stats, dets)
+        image_id = db.insert_image(con, rec, out, stats, dets)
+        if cnn.available():
+            try:
+                cnn.classify_image(con, image_id)
+            except Exception as e:          # the CNN is an extra; never block fetching
+                log.warning("CNN failed on %s: %s", rec["external_id"], e)
         log.info("%s %s: %d sources, %d galaxies", rec["source"].upper(), rec["target"],
                  stats["n_sources"], stats.get("n_galaxies", 0))
         n += 1

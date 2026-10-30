@@ -204,6 +204,8 @@ function renderClassify() {
   const ai = t.kind === 'bh' ? t.cls : t.aiLabel;
   box.innerHTML = `
     <div class="control-head"><span>Your classification</span><b>${labelCount ? `${labelCount} labelled` : ''}</b></div>
+    ${t.cnn ? `<div class="cnn-box"><div class="cnn-head">OUR CNN · Galaxy Zoo-trained</div>${t.cnn.top.map(([k, p]) =>
+      `<div class="cnn-row"><span>${k}</span><i style="--p:${Math.round(p * 100)}%"></i><b>${Math.round(p * 100)}%</b></div>`).join('')}</div>` : ''}
     <div class="classify-ai">AI says <b>${ai}</b>${mine ? ` · you said <b class="mine">${mine}</b>` : ' · what do you think?'}</div>
     <div class="classify-grid">${CLASSES[t.kind].map(([k, l]) => `<button data-label="${k}" class="${mine === k ? 'on' : ''}">${l}</button>`).join('')}</div>`;
 }
@@ -225,7 +227,7 @@ $('#classify').addEventListener('click', async (e) => {
     toast(`Saved: <b>${lbl}</b> · ${labelCount} object${labelCount === 1 ? '' : 's'} labelled (training data for the next model)`, '#4ade80');
   } catch { toast('Could not save your label', '#fb7185'); }
   // the 3D model follows your call
-  if (t.kind === 'galaxy' && ['spiral', 'elliptical', 'edge-on', 'star'].includes(lbl)) inspector.reshape(lbl);
+  if (t.kind === 'galaxy' && ['spiral', 'elliptical', 'edge-on', 'merger', 'star'].includes(lbl)) inspector.reshape(lbl);
   renderClassify();
 });
 

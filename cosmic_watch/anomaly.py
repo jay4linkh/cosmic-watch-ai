@@ -220,12 +220,38 @@ def deep_outliers(con, image_id: int):
     return out
 
 
+# Checked on live data: confident 'Merging' calls are real close pairs; 'Disturbed' also catches
+# star spikes and trails (Galaxy10 has no 'not a galaxy' class), so only Merging, and only when sure.
+MERGER_CONF = 0.9
+
+
+def cnn_mergers(con, image_id: int):
+    """Galaxies our CNN thinks are merging or disturbed: rare and scientifically interesting."""
+    img = con.execute("SELECT source, target, stats FROM images WHERE id=?", (image_id,)).fetchone()
+    if not img:
+        return []
+    w, h = json.loads(img["stats"] or "{}").get("size", [1, 1])
+    out = []
+    for d in con.execute("""SELECT id, x, y, cnn_label, cnn_conf FROM detections WHERE image_id=?
+                            AND cnn_label = 'Merging' AND cnn_conf >= ?
+                            ORDER BY cnn_conf DESC LIMIT 3""", (image_id, MERGER_CONF)).fetchall():
+        out.append({
+            "key": f"cnnmerger:{image_id}:{d['id']}", "source": img["source"], "kind": "cnn_merger",
+            "score": round(float(d["cnn_conf"]), 3),
+            "title": f"Possible galaxy collision in {img['target']}",
+            "reason": f"Our CNN (trained on Galaxy Zoo) is {d['cnn_conf']:.0%} sure this galaxy is merging with another.",
+            "hypotheses": ["two galaxies colliding", "a galaxy with tidal tails", "two unrelated galaxies overlapping in projection"],
+            "ref": {"view": "deep", "image_id": image_id, "u": round(d["x"] / w, 5), "v": round(d["y"] / h, 5), "det_id": d["id"]},
+        })
+    return out
+
+
 def run_deep(con, image_ids=None) -> int:
     ids = image_ids or [r[0] for r in con.execute("SELECT id FROM images WHERE source IN ('jwst','hst')").fetchall()]
     n = 0
     for iid in ids:
         try:
-            for a in deep_outliers(con, iid):
+            for a in deep_outliers(con, iid) + cnn_mergers(con, iid):
                 n += record(con, a)
         except Exception as e:
             log.warning("deep anomaly check %s failed: %s", iid, e)

@@ -10,6 +10,13 @@ const LABEL_COLORS = {
   'large galaxy': [0.4, 1.0, 0.55],
 };
 const N_CALLOUTS = 9;
+// Galaxy10 class -> 3D model shape
+const CNN_SHAPE = {
+  'Disturbed': 'merger', 'Merging': 'merger',
+  'Round smooth': 'elliptical', 'In-between round smooth': 'elliptical', 'Cigar-shaped smooth': 'elliptical',
+  'Barred spiral': 'spiral', 'Unbarred tight spiral': 'spiral', 'Unbarred loose spiral': 'spiral',
+  'Edge-on without bulge': 'edge-on', 'Edge-on with bulge': 'edge-on',
+};
 
 export function createDeep(ctx) {
   const group = new THREE.Group();
@@ -121,24 +128,31 @@ export function createDeep(ctx) {
     const { det, meta } = current;
     const r = det.rows[i], lbl = det.labels[r[5]];
     const ellip = 1 - r[3] / Math.max(r[2], 1e-6);
-    const shape = lbl === 'star' ? 'star' : (lbl === 'galaxy' && ellip < 0.2) ? 'elliptical' : 'spiral';
+    // Our CNN's call (if it ran on this source) decides the model; otherwise the shape rules do.
+    const cnn = r[7] >= 0 ? { label: det.cnn_classes[r[7]], conf: r[8] } : null;
+    const cnnShape = cnn && CNN_SHAPE[cnn.label];
+    const shape = cnnShape || (lbl === 'star' ? 'star' : (lbl === 'galaxy' && ellip < 0.2) ? 'elliptical' : 'spiral');
+    const name = cnn ? cnn.label : lbl;
     const sizePx = r[2] * det.width;
     const c = LABEL_COLORS[lbl] || [1, 1, 1];
     return {
-      key: `${meta.id}:${i}`,
-      kind: 'galaxy', shape, ellip, theta: r[4], seed: i + 1, aiLabel: lbl,
+      key: `${meta.id}:${r[9] ?? i}`,
+      detId: r[9],
+      kind: 'galaxy', shape, ellip, theta: r[4], seed: i + 1, aiLabel: cnn ? `${cnn.label} (${Math.round(cnn.conf * 100)}%)` : lbl,
+      barred: cnn?.label === 'Barred spiral',
       crop: { id: meta.id, u: r[0].toFixed(4), v: r[1].toFixed(4), r: Math.min(0.08, Math.max(0.012, r[2] * 5)) },
       color: new THREE.Color(...c).getHex(),
-      short: `#${rank} ${lbl}`, badge: fmt(Math.round(r[6])),
+      short: `#${rank} ${name}`, badge: cnn ? `${Math.round(cnn.conf * 100)}%` : fmt(Math.round(r[6])),
       kicker: `${meta.source.toUpperCase()} · ${meta.target} · INSPECT`,
-      title: `${lbl[0].toUpperCase()}${lbl.slice(1)} #${rank}`,
+      title: `${name[0].toUpperCase()}${name.slice(1)} #${rank}`,
       sub: `Found by the AI in this ${meta.source.toUpperCase()} image. Right: the real pixels at full resolution. Left: a 3D model built from its measured size, shape and angle. Zoom in as deep as you like, then classify it yourself.`,
       stats: [['Brightness (flux)', fmt(Math.round(r[6]))], ['Size', `${sizePx.toFixed(1)} px`],
               ['Ellipticity', ellip.toFixed(2)], ['Angle', `${Math.round((r[4] * 180) / Math.PI)}°`],
               ['Position', `${(r[0] * 100).toFixed(1)}%, ${(r[1] * 100).toFixed(1)}%`], ['Model', shape]],
       imageUrl: `/api/images/${meta.id}/crop?u=${r[0].toFixed(4)}&v=${r[1].toFixed(4)}&r=${Math.min(0.08, Math.max(0.012, r[2] * 5)).toFixed(4)}`,
       imageNote: `${meta.source.toUpperCase()} ${meta.instrument} · full-resolution close-up`,
-      modelNote: shape === 'star' ? 'foreground star (illustrative)' : `${shape} galaxy · illustrative, from measured shape`,
+      modelNote: shape === 'star' ? 'foreground star (illustrative)'
+        : cnn ? `${cnn.label.toLowerCase()} · shape from our CNN, structure illustrative` : `${shape} galaxy · illustrative, from measured shape`,
     };
   }
 
