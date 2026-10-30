@@ -111,15 +111,25 @@ def run_alerts(con) -> int:
 SOURCES = {"sdo": run_sdo, "mast": run_mast, "alerts": run_alerts}
 
 
-def run_source(con, name: str) -> None:
+RETRY_AFTER_ERROR_S = 120
+
+
+def run_source(con, name: str) -> bool:
     run_id = db.start_run(con, name)
     try:
         n = SOURCES[name](con)
         db.finish_run(con, run_id, "ok", n)
         log.info("[%s] ok, %d new", name, n)
+        return True
     except Exception as e:
         db.finish_run(con, run_id, "error", 0, f"{e}\n{traceback.format_exc(limit=2)}")
         log.error("[%s] failed: %s", name, e)
+        return False
+
+
+def next_delay(name: str, ok: bool) -> float:
+    """Normal interval after success; retry soon after a failure (network blips are common)."""
+    return INTERVALS[name] if ok else min(RETRY_AFTER_ERROR_S, INTERVALS[name])
 
 
 def main(argv=None):
@@ -146,8 +156,8 @@ def main(argv=None):
         now = time.time()
         for name in names:
             if now >= next_due[name]:
-                run_source(con, name)
-                next_due[name] = time.time() + INTERVALS[name]
+                ok = run_source(con, name)
+                next_due[name] = time.time() + next_delay(name, ok)
         time.sleep(15)
 
 

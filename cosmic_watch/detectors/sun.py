@@ -49,7 +49,8 @@ def sunspots(path):
     spots = cv2.morphologyEx(spots.astype(np.uint8), cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
     regs = _regions(spots, min_area=4, intensity=1 - ratio, label="sunspot")
     stats = {"n_sunspots": len(regs), "spot_area_px": int(sum(d["area"] for d in regs)),
-             "disk_radius_px": round(r, 1)}
+             "disk_radius_px": round(r, 1),
+             "disk_center_px": [round(centre[0], 1), round(centre[1], 1)], "size": [gray.shape[1], gray.shape[0]]}
     return bgr, regs, stats
 
 
@@ -75,6 +76,8 @@ def active_regions(path, n_sigma: float = 3.0):
         "activity_index": round(100.0 * float(((gray > thr) & disk).sum()) / float(disk.sum()), 2),
         "peak_brightness": int(gray[disk].max()),
         "disk_radius_px": round(r, 1),
+        "disk_center_px": [round(centre[0], 1), round(centre[1], 1)],
+        "size": [gray.shape[1], gray.shape[0]],
     }
     return bgr, regs, stats
 
