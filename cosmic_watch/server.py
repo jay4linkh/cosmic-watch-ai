@@ -20,6 +20,7 @@ from PIL import Image
 
 from . import agent, anomaly, db
 from .config import DATA, INTERVALS, ROOT
+from .ml.classes import CLASSES as CNN_CLASSES, COARSE as CNN_COARSE
 
 Image.MAX_IMAGE_PIXELS = None
 log = logging.getLogger("cosmic_watch")
@@ -207,16 +208,33 @@ def detections(image_id: int, limit: int = Query(4000, le=20000)):
         raise HTTPException(404)
     stats = json.loads(img[0]["stats"] or "{}")
     w, h = stats.get("size") or [1024, 1024]
-    dets = rows("SELECT label, x, y, a, b, theta, score FROM detections WHERE image_id=? ORDER BY score DESC LIMIT ?",
-                (image_id, limit))
+    dets = rows("""SELECT id, label, x, y, a, b, theta, score, cnn_label, cnn_conf FROM detections
+                   WHERE image_id=? ORDER BY score DESC LIMIT ?""", (image_id, limit))
     labels = sorted({d["label"] for d in dets})
     idx = {l: i for i, l in enumerate(labels)}
     return {
         "image": image_out(img[0]), "width": w, "height": h, "labels": labels,
-        # compact rows: [u, v, a/w, b/w, theta, label_index, score] with u,v in 0..1
+        "cnn_classes": CNN_CLASSES,
+        # compact rows: [u, v, a/w, b/w, theta, label_index, score, cnn_class (-1 = none), cnn_conf, detection_id]
         "rows": [[round(d["x"] / w, 5), round(d["y"] / h, 5), round(d["a"] / w, 5), round(d["b"] / w, 5),
-                  round(d["theta"] or 0, 3), idx[d["label"]], round(d["score"] or 0, 2)] for d in dets],
+                  round(d["theta"] or 0, 3), idx[d["label"]], round(d["score"] or 0, 2),
+                  CNN_CLASSES.index(d["cnn_label"]) if d["cnn_label"] in CNN_CLASSES else -1,
+                  round(d["cnn_conf"] or 0, 3), d["id"]] for d in dets],
     }
+
+
+@app.get("/api/detections/{det_id}/cnn")
+def detection_cnn(det_id: int):
+    """Full CNN probabilities for one detection (Inspect mode)."""
+    r = rows("SELECT cnn_label, cnn_conf, cnn_probs FROM detections WHERE id=?", (det_id,))
+    if not r or not r[0]["cnn_probs"]:
+        return {"available": False}
+    probs = json.loads(r[0]["cnn_probs"])
+    order = sorted(range(len(probs)), key=lambda i: -probs[i])
+    return {"available": True, "label": r[0]["cnn_label"], "conf": r[0]["cnn_conf"],
+            "top": [[CNN_CLASSES[i], probs[i]] for i in order[:4]],
+            "coarse": {k: round(sum(probs[i] for i in idx), 4) for k, idx in CNN_COARSE.items()},
+            "model": "galaxy_cnn_v1"}
 
 
 @app.get("/api/images/{image_id}/crop")

@@ -21,6 +21,7 @@ KIND_NAMES = {
     "deep_outlier": "an unusual object in a deep field",
     "tde_candidate": "a black hole shredding a star",
     "classifier_disagreement": "a case where the AI and the classifier disagree",
+    "cnn_merger": "a possible galaxy collision (CNN)",
 }
 OPENERS = ["This looks interesting.", "Something caught my eye.", "Have a look at this.", "I found an odd one."]
 

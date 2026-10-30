@@ -106,6 +106,10 @@ def connect() -> sqlite3.Connection:
     con.execute("PRAGMA journal_mode=WAL")   # dashboard reads while pipeline writes
     con.execute("PRAGMA foreign_keys=ON")
     con.executescript(SCHEMA)
+    dcols = {r[1] for r in con.execute("PRAGMA table_info(detections)")}
+    for col, typ in (("cnn_label", "TEXT"), ("cnn_conf", "REAL"), ("cnn_probs", "TEXT")):   # galaxy CNN output
+        if col not in dcols:
+            con.execute(f"ALTER TABLE detections ADD COLUMN {col} {typ}")
     cols = {r[1] for r in con.execute("PRAGMA table_info(alerts)")}
     if "first_seen" not in cols:   # databases created before the column existed
         con.execute("ALTER TABLE alerts ADD COLUMN first_seen TEXT")

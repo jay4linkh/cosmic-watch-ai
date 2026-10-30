@@ -22,13 +22,17 @@ function points(n, scale = 300) {
 
 // ---------- galaxy models ----------
 
-function spiralGalaxy(seed, { arms = 2, wind = 2.6, tint = [0.55, 0.75, 1] } = {}) {
+function spiralGalaxy(seed, { arms = 2, wind = 2.6, tint = [0.55, 0.75, 1], bar = false } = {}) {
   const r = rng(seed), N = 14000, pts = points(N, 260);
+  const barN = bar ? N * 0.12 : 0;
   const P = pts.geometry.attributes.position.array, C = pts.geometry.attributes.aColor.array, S = pts.geometry.attributes.aSize.array;
   const base = new Float32Array(N * 3);
   for (let i = 0; i < N; i++) {
     let x, y, z, col;
-    if (i < N * 0.22) {                         // bulge
+    if (i < barN) {                              // central bar: arms start at its ends
+      x = (r() * 2 - 1) * 3.2; z = gauss(r) * 0.45; y = gauss(r) * 0.15;
+      col = [1, 0.84, 0.62];
+    } else if (i < N * 0.22) {                  // bulge
       const rr = Math.abs(gauss(r)) * 1.3;
       const th = r() * Math.PI * 2, ph = Math.acos(2 * r() - 1);
       x = rr * Math.sin(ph) * Math.cos(th); z = rr * Math.sin(ph) * Math.sin(th); y = rr * Math.cos(ph) * 0.6;
@@ -47,6 +51,29 @@ function spiralGalaxy(seed, { arms = 2, wind = 2.6, tint = [0.55, 0.75, 1] } = {
   }
   pts.userData.base = base;
   return pts;
+}
+
+// Two galaxies colliding: tilted disks plus tidal tails and a bridge of stripped stars.
+function mergerModel(seed) {
+  const g = new THREE.Group();
+  const a = spiralGalaxy(seed, { arms: 2, wind: 2.2 }), b = spiralGalaxy(seed + 99, { arms: 2, wind: 3, tint: [0.75, 0.6, 1] });
+  a.scale.setScalar(0.62); b.scale.setScalar(0.5);
+  a.position.set(-4.2, 0, 0); b.position.set(4.6, 0.8, -1);
+  a.rotation.set(0.3, 0, 0.5); b.rotation.set(1.1, 0.4, -0.3);
+  const r = rng(seed + 5), N = 5000, tail = points(N, 260);
+  const P = tail.geometry.attributes.position.array, C = tail.geometry.attributes.aColor.array, S = tail.geometry.attributes.aSize.array;
+  for (let i = 0; i < N; i++) {
+    const t = r(), side = i % 3;   // 0: bridge, 1-2: long tidal tails
+    let x, y, z;
+    if (side === 0) { x = -4.2 + t * 8.8; y = Math.sin(t * Math.PI) * 1.6; z = -0.5 * t; }
+    else { const s = side === 1 ? -1 : 1; const ang = t * 2.4; x = s * (4.5 + Math.cos(ang) * t * 7); y = Math.sin(ang) * t * 5 * s; z = t * 2 * s; }
+    P.set([x + gauss(r) * 0.35, y + gauss(r) * 0.25, z + gauss(r) * 0.35], i * 3);
+    const c = [0.75 + r() * 0.25, 0.7 + r() * 0.2, 1];
+    C.set(c, i * 3); S[i] = 0.2 + r() * 0.45;
+  }
+  g.add(a, b, tail, glowSprite(0xfff0c0, 5, 0.45));
+  g.userData.spinners = [a, b];
+  return g;
 }
 
 function ellipticalGalaxy(seed) {
@@ -236,8 +263,10 @@ export function createInspector(ctx) {
     const seed = tg.seed || 1;
     if (tg.kind === 'bh') return bhModel(tg.cls, seed);
     if (tg.shape === 'star') return starModel();
+    if (tg.shape === 'merger') return mergerModel(seed);
     const wrap = new THREE.Group();
-    const inner = tg.shape === 'elliptical' ? ellipticalGalaxy(seed) : spiralGalaxy(seed, { arms: 2 + (seed % 2), wind: 2.2 + (seed % 5) * 0.25 });
+    const inner = tg.shape === 'elliptical' ? ellipticalGalaxy(seed)
+      : spiralGalaxy(seed, { arms: tg.barred ? 2 : 2 + (seed % 2), wind: 2.2 + (seed % 5) * 0.25, bar: !!tg.barred });
     wrap.add(inner);
     wrap.add(glowSprite(tg.shape === 'elliptical' ? 0xffc070 : 0xfff0c0, 7, 0.5));
     // tilt from the measured ellipticity, rotate by the measured position angle
@@ -259,6 +288,11 @@ export function createInspector(ctx) {
     group.add(mTag);
     tags.push(mTag);
     ctx.onInfoChange();
+    if (tg.kind === 'galaxy' && tg.detId != null && !tg.cnn) {
+      fetch(`/api/detections/${tg.detId}/cnn`).then((r) => r.json()).then((c) => {
+        if (my === token && c.available) { tg.cnn = c; ctx.onInfoChange(); }
+      }).catch(() => {});
+    }
     try {
       const tex = await loadTexture(tg.imageUrl);
       if (my !== token) { tex.dispose(); return; }
@@ -318,6 +352,7 @@ export function createInspector(ctx) {
     update(dt, t, e) {
       if (!model) return;
       if (model.userData.parts) animateBH(model, dt, t, e);
+      if (model.userData.spinners) model.userData.spinners.forEach((s, k) => { s.rotation.y += dt * (k ? -0.16 : 0.12); });
       if (model.userData.inner) {
         model.userData.inner.rotation.y += dt * 0.12;
         const base = model.userData.inner.userData.base, P = model.userData.inner.geometry.attributes.position.array;
