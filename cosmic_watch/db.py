@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS alerts (
     diff_snr REAL,                   -- our CV score on the difference stamp
     stamp_path TEXT,
     fetched_at TEXT NOT NULL,
+    first_seen TEXT,                 -- when we first stored it (drives the live event feed)
     UNIQUE (survey, oid, cls)
 );
 CREATE TABLE IF NOT EXISTS runs (
@@ -79,6 +80,11 @@ def connect() -> sqlite3.Connection:
     con.execute("PRAGMA journal_mode=WAL")   # dashboard reads while pipeline writes
     con.execute("PRAGMA foreign_keys=ON")
     con.executescript(SCHEMA)
+    cols = {r[1] for r in con.execute("PRAGMA table_info(alerts)")}
+    if "first_seen" not in cols:   # databases created before the column existed
+        con.execute("ALTER TABLE alerts ADD COLUMN first_seen TEXT")
+        con.execute("UPDATE alerts SET first_seen = fetched_at")
+        con.commit()
     return con
 
 
@@ -113,9 +119,9 @@ def upsert_alert(con, a: dict) -> bool:
                       (a["survey"], a["oid"], a["cls"])).fetchone() is None
     con.execute(
         """INSERT INTO alerts (survey, oid, cls, classifier, probability, lastmjd, ra, dec, n_det,
-                               bh_candidate, diff_snr, stamp_path, fetched_at)
+                               bh_candidate, diff_snr, stamp_path, fetched_at, first_seen)
            VALUES (:survey,:oid,:cls,:classifier,:probability,:lastmjd,:ra,:dec,:n_det,
-                   :bh_candidate,:diff_snr,:stamp_path,:fetched_at)
+                   :bh_candidate,:diff_snr,:stamp_path,:fetched_at,:fetched_at)
            ON CONFLICT (survey, oid, cls) DO UPDATE SET
                probability=excluded.probability, lastmjd=excluded.lastmjd, n_det=excluded.n_det,
                fetched_at=excluded.fetched_at,

@@ -2,9 +2,10 @@
 
 Fetches **live data from real observatories** (Rubin, ZTF, JWST, Hubble and SDO) and runs
 **computer vision** on it to find galaxies, supernovae, solar active regions and **signs of black-hole activity**.
-Everything shows up on a dashboard that refreshes itself.
+Everything shows up in a **3D observatory** you can fly through, or control with **your bare hands** through the webcam.
 
-> Status: **v0 works end to end** on live data. The galaxy classifier is rule-based for now; see the [roadmap](#roadmap).
+> Status: **v1**: live data, computer vision, 3D web app and hand-gesture control all work end to end.
+> The galaxy classifier is rule-based for now; see the [roadmap](#roadmap).
 
 ---
 
@@ -38,22 +39,51 @@ pip install -r requirements.txt
 # terminal 1: keep fetching (alerts every 10 min, Sun every 15 min, JWST/Hubble every 6 h)
 python -m cosmic_watch.pipeline
 
-# terminal 2: dashboard at http://localhost:8501
-streamlit run dashboard/app.py
+# terminal 2: the 3D observatory at http://localhost:8000
+uvicorn cosmic_watch.server:app --port 8000
 ```
 
-One-off runs: `python -m cosmic_watch.pipeline --once` (all sources) or `--once --only sdo,alerts`.
-The dashboard sidebar also has **Fetch now** buttons.
+Or run it all in one process: `RUN_PIPELINE=1 uvicorn cosmic_watch.server:app` (that's what the deploy does).
+One-off fetches: `python -m cosmic_watch.pipeline --once` (all sources) or `--once --only sdo,alerts`.
+The older analyst dashboard is still there: `streamlit run dashboard/app.py` (port 8501).
 
 > **Windows tip:** if `astropy` fails with *"The filename or extension is too long"*, the project path is too deep.
 > Create the venv somewhere short (e.g. `C:\venvs\cosmic-watch`).
 
-## Dashboard tabs
+## The 3D observatory
 
-- **🌌 Deep Space**: newest public JWST/Hubble images, with the AI's detections toggled on or off and star/galaxy counts
-- **🕳️ Black Hole Watch**: TDE / AGN / QSO / Blazar candidates from Rubin and ZTF, with cutouts and broker links
-- **📡 Rubin Live**: the latest Rubin alerts, class breakdown and cutout grid
-- **☀️ Sun**: latest SDO images with sunspots and active regions marked
+Built with Three.js (WebGL + bloom), served by FastAPI. Four worlds, all from live data:
+
+| View | What you see | "Explode" does |
+|---|---|---|
+| **Observatory** | Telescopes → AI detectors → discoveries as glowing planets; every pulse along the orbits is real data arriving | spreads the system apart |
+| **Deep Field** | The newest public JWST/Hubble image, with every AI detection as a particle | pulls the image apart: galaxies recede by brightness, stars come forward, callouts mark the biggest galaxies |
+| **Black Holes** | A live accretion disk with real Rubin/ZTF candidate cut-outs (TDE / AGN / QSO / Blazar) in orbit; click one for details | widens the orbits |
+| **The Sun** | The latest SDO image wrapped on a sphere, AI-detected active regions ringed | raises magnetic loops off the surface and pushes out the solar wind |
+
+Plus a live event trace, source health, a guided tour, and keyboard shortcuts (`1`–`4` views, `Space` explode, `←/→` items, `H` hand mode).
+
+### ✋ Hand mode
+
+Press **Hand mode** (or `H`): your camera becomes the background and the scene floats over it like a hologram.
+Hand tracking runs **entirely in your browser** with [MediaPipe](https://ai.google.dev/edge/mediapipe/solutions/vision/hand_landmarker). No video leaves your machine.
+
+| Gesture | Action |
+|---|---|
+| ✋ Open hand | explode the scene (continuous: how open your hand is) |
+| ✊ Close hand | assemble; **hold** to fly home |
+| 🤏 Pinch + move | rotate |
+| 🙌 Two-hand pinch | zoom (pull apart / together) |
+| ☝️ Point, hold 1 s | select what you point at |
+| 🫰 Snap (thumb + middle) | next image / channel / class |
+
+The camera needs `localhost` or HTTPS. Good, even lighting helps; there's a sensitivity setting in the side panel.
+
+## Deploy (live link)
+
+The repo includes a Render blueprint (`render.yaml`): in Render choose **New + → Blueprint**, pick this repo, and it builds and
+starts the web app with the pipeline running inside it. Render gives you HTTPS, so hand mode works on the live link.
+On the free plan the service sleeps when idle and its disk is temporary, so data is re-fetched after each wake-up (about 5 min).
 
 ## Project layout
 
@@ -62,6 +92,7 @@ cosmic_watch/
 ├── config.py            # intervals, limits, paths
 ├── db.py                # SQLite: images, detections, alerts, runs
 ├── pipeline.py          # fetch -> detect -> store loop (CLI)
+├── server.py            # FastAPI: JSON API + serves the 3D web app
 ├── fetchers/
 │   ├── alerts.py        # Rubin + ZTF via ALeRCE
 │   ├── mast.py          # JWST + Hubble new releases
@@ -70,7 +101,16 @@ cosmic_watch/
     ├── galaxies.py      # star/galaxy detection in deep fields
     ├── stamps.py        # alert cutout rendering + difference-image score
     └── sun.py           # sunspots + active regions
-dashboard/app.py         # Streamlit live dashboard
+web/                     # 3D observatory (Three.js) + hand tracking (MediaPipe)
+├── index.html
+├── css/style.css
+└── js/
+    ├── main.js          # app shell, camera, picking, live polling, tour
+    ├── hands.js         # webcam hand tracking -> gestures
+    ├── fx.js            # glow shaders, starfield, helpers
+    └── views/           # observatory · deep · blackholes · sun
+dashboard/app.py         # Streamlit analyst dashboard
+render.yaml              # one-click deploy
 notebooks/               # exploration & training (next phase)
 data/                    # downloaded images + database (git-ignored)
 ```
@@ -81,6 +121,7 @@ data/                    # downloaded images + database (git-ignored)
 - [x] **Phase 2, Detection v0**: classical CV for galaxies, sunspots and alert cutouts
 - [x] **Phase 3, Black-hole watch**: TDE / AGN / QSO / Blazar candidates from broker classes
 - [x] **Phase 4, Live dashboard**
+- [x] **Phase 4b, 3D observatory + hand-gesture control**
 - [ ] **Phase 5, Trained models**: replace the rule-based galaxy labels with a CNN trained on Galaxy Zoo (or Zoobot); our own real/bogus CNN on alert cutouts
 - [ ] **Phase 6**: gravitational-lens finder, anomaly detection (autoencoder), galaxy similarity search (DINOv2/CLIP)
 - [ ] Rubin via Fink as a second broker (its API was timing out when v0 was built)
