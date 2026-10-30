@@ -66,6 +66,7 @@ const ctx = {
   get handMode() { return state.handMode; },
   goTo: (v) => switchView(v),
   inspect: (t) => openInspect(t),
+  flyTo: (home, ms) => flyTo(home, ms),
   onInfoChange: () => { renderInfo(); renderItems(); },
   showDetail(html) { $('#detail-body').innerHTML = html; $('#detail').classList.add('open'); },
 };
@@ -122,6 +123,7 @@ async function closeInspect({ fly = true } = {}) {
   state.inspecting = false;
   document.body.classList.remove('inspecting');
   controls.enableZoom = true;
+  controls.enableRotate = true;
   scene.add(current.group);
   state.explode = state.target = 0;
   $('#explode-label').textContent = current.explodeLabel || 'Exploded view';
@@ -289,7 +291,16 @@ function hideTip() { $('#tip').classList.remove('show'); }
 
 let downAt = null;
 canvas.addEventListener('pointerdown', (e) => { downAt = [e.clientX, e.clientY]; });
-canvas.addEventListener('pointermove', (e) => { if (!state.handMode) hoverAt(e.clientX, e.clientY); });
+let lastDrag = null;
+canvas.addEventListener('pointermove', (e) => {
+  if (state.inspecting && inspector.fullness > 0.8 && e.buttons) {     // drag turns the photo in full view
+    if (lastDrag) inspector.tiltBy((e.clientX - lastDrag[0]) / innerWidth, (e.clientY - lastDrag[1]) / innerHeight);
+    lastDrag = [e.clientX, e.clientY];
+    return;
+  }
+  lastDrag = null;
+  if (!state.handMode) hoverAt(e.clientX, e.clientY);
+});
 canvas.addEventListener('pointerup', (e) => {
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
   const hit = pickAt(e.clientX, e.clientY);
@@ -334,7 +345,7 @@ async function toggleHandMode() {
       video: $('#cam'), canvas: hc,
       on: {
         explode: (v) => setExplodeTarget(v),
-        rotate: (dx, dy) => rotateCamera(dx, dy),
+        rotate: (dx, dy) => (state.inspecting && inspector.fullness > 0.8 ? inspector.tiltBy(dx, dy) : rotateCamera(dx, dy)),
         zoom: (f) => zoomCamera(f),
         point: (x, y) => { handHoverDom(x, y); hoverAt(x, y); },
         pointEnd: () => { handHoverDom(-1, -1); if (hoverObj) { hoverObj = null; current?.unhover?.(); hideTip(); } },
@@ -452,6 +463,72 @@ function toast(html, color = '#67e8f9') {
   while ($('#toasts').children.length > 3) $('#toasts').firstChild.remove();
 }
 
+// ---------- agent ----------
+// The agent watches the anomaly feed, suggests what to look at, and learns from
+// what you open or skip (a Thompson-sampling bandit on the server).
+const agentState = { current: null, shown: new Set(), typing: null };
+
+function typeOut(el, text) {
+  clearInterval(agentState.typing);
+  el.textContent = '';
+  let i = 0;
+  agentState.typing = setInterval(() => {
+    el.textContent = text.slice(0, (i += 3));
+    if (i >= text.length) clearInterval(agentState.typing);
+  }, 16);
+}
+
+async function agentNext() {
+  const box = $('#agent');
+  box.classList.add('thinking');
+  try {
+    const r = await api(`/api/agent/suggestion?exclude=${[...agentState.shown].join(',')}`);
+    const s = r.suggestion;
+    const kinds = Object.values(r.stats.interest || {});
+    $('#agent-sub').textContent = `${r.stats.new} anomalies waiting · ${kinds.length ? 'learning your taste' : 'learning'}`;
+    if (!s) { agentState.current = null; box.hidden = true; return; }
+    if (agentState.current?.id === s.id) return;
+    agentState.current = s;
+    agentState.shown.add(s.id);
+    box.hidden = false;
+    $('#agent-title').textContent = s.title;
+    typeOut($('#agent-msg'), s.message);
+    $('#agent-hyp').innerHTML = (s.hypotheses || []).map((h) => `<span>${h}</span>`).join('');
+    $('#agent-why').textContent = s.why_me;
+  } catch { /* offline: try again next poll */ } finally { box.classList.remove('thinking'); }
+}
+
+async function agentFeedback(action) {
+  const s = agentState.current;
+  if (!s) return;
+  try {
+    await fetch('/api/agent/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: s.id, action }) });
+  } catch {}
+}
+
+async function agentLook() {
+  const s = agentState.current;
+  if (!s) return;
+  agentFeedback('look');
+  const ref = s.ref || {};
+  try {
+    if (ref.view === 'deep') { await switchView('deep'); await views.deep.openAt(ref.image_id, ref.u, ref.v); }
+    else if (ref.view === 'bh') { await switchView('bh'); await views.bh.openOid(ref.survey, ref.oid); }
+    else if (ref.view === 'sun') { await switchView('sun'); await views.sun.focusOn(ref.channel, ref.x, ref.y); renderItems(); renderInfo(); }
+  } catch (e) { toast(`Couldn't open it: ${e.message}`, '#fb7185'); }
+  agentState.current = null;
+  setTimeout(agentNext, 12000);       // give you time to look before the next idea
+  $('#agent').hidden = true;
+}
+
+$('#agent-look').addEventListener('click', agentLook);
+$('#agent-skip').addEventListener('click', async () => { await agentFeedback('dismiss'); agentState.current = null; agentNext(); });
+$('#agent-min').addEventListener('click', () => {
+  const a = $('#agent');
+  a.classList.toggle('min');
+  $('#agent-min').textContent = a.classList.contains('min') ? '+' : '–';
+});
+
 // ---------- detail / trace ----------
 $('#detail-close').addEventListener('click', () => $('#detail').classList.remove('open'));
 $('#trace-toggle').addEventListener('click', () => {
@@ -535,6 +612,7 @@ function frame() {
 
   if (state.inspecting) {
     inspector.update(dt, t, state.explode);
+    controls.enableRotate = inspector.fullness < 0.8;
     // zoom = camera distance: open hand / wheel / slider all drive it
     if (!flight) {
       const off = camera.position.clone().sub(controls.target);
@@ -583,6 +661,8 @@ function frame() {
   // warm the other views in the background so switching is instant
   setTimeout(() => { views.deep.load().catch(() => {}); views.bh.load().catch(() => {}); views.sun.load().catch(() => {}); }, 1500);
   setInterval(refreshSummary, 20000);
+  setTimeout(agentNext, 4000);
+  setInterval(() => { if (!agentState.current) agentNext(); }, 30000);
   setInterval(refreshEvents, 15000);
   let seenTour = false;
   try { seenTour = localStorage.getItem('cw-tour') === '1'; } catch {}

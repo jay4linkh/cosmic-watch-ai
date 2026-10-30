@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import db
+from . import agent, anomaly, db
 from .config import DATA, INTERVALS, ROOT
 
 Image.MAX_IMAGE_PIXELS = None
@@ -301,6 +301,39 @@ def label_stats():
     by = rows("SELECT kind, label, COUNT(*) n FROM user_labels GROUP BY kind, label ORDER BY n DESC")
     return {"total": sum(r["n"] for r in by), "by_label": by,
             "recent": rows("SELECT key, kind, label, ai_label, created_at FROM user_labels ORDER BY id DESC LIMIT 20")}
+
+
+class FeedbackIn(BaseModel):
+    id: int
+    action: str = Field(pattern="^(look|dismiss|label)$")
+
+
+@app.get("/api/agent/suggestion")
+def agent_suggestion(exclude: str = ""):
+    con = db.connect()
+    try:
+        ex = {int(x) for x in exclude.split(",") if x.strip().isdigit()}
+        return {"suggestion": agent.suggest(con, ex), "stats": agent.stats(con)}
+    finally:
+        con.close()
+
+
+@app.post("/api/agent/feedback")
+def agent_feedback(body: FeedbackIn):
+    con = db.connect()
+    try:
+        return agent.feedback(con, body.id, body.action)
+    finally:
+        con.close()
+
+
+@app.get("/api/anomalies")
+def anomalies_list(limit: int = Query(50, le=500)):
+    out = rows("SELECT * FROM anomalies ORDER BY id DESC LIMIT ?", (limit,))
+    for r in out:
+        r["hypotheses"] = json.loads(r["hypotheses"] or "[]")
+        r["ref"] = json.loads(r["ref"] or "{}")
+    return out
 
 
 # ---------- files ----------

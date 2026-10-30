@@ -163,6 +163,18 @@ export function createBlackHoles(ctx) {
       const siblings = shown.map(alertTarget);
       ctx.inspect({ ...alertTarget(a), siblings });
     },
+    async openOid(survey, oid) {
+      if (!all.length) await this.load();
+      let a = all.find((x) => x.survey === survey && String(x.oid) === String(oid));
+      if (!a) {
+        const more = await api(`/api/alerts?survey=${survey}&limit=500`);
+        a = more.find((x) => String(x.oid) === String(oid));
+      }
+      if (!a) return false;
+      const sibs = [a, ...all.filter((x) => x !== a)].slice(0, 20).map(alertTarget);
+      ctx.inspect({ ...sibs[0], siblings: sibs });
+      return true;
+    },
     items: () => FILTERS.map((f) => ({ label: f, sub: f === 'All' ? `${all.length}` : `${all.filter((a) => a.cls === f).length}` })),
     get itemIndex() { return filter; },
     selectItem(i) { filter = i; return build(); },

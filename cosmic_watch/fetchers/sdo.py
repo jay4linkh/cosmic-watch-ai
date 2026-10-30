@@ -14,6 +14,8 @@ CHANNELS = {
     "0171": ("SDO AIA 171 Å (quiet corona, loops)", "active_regions"),
     "0193": ("SDO AIA 193 Å (corona, coronal holes)", "active_regions"),
     "0304": ("SDO AIA 304 Å (chromosphere, prominences)", "active_regions"),
+    "0131": ("SDO AIA 131 Å (flaring plasma, ~10 million °C)", "active_regions"),
+    "0094": ("SDO AIA 94 Å (hot flare loops, ~6 million °C)", "active_regions"),
 }
 
 

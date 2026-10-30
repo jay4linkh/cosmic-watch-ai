@@ -7,6 +7,7 @@ opencv-python-headless==5.0.0.93
 pandas==3.1.0
 pillow==13.0.0
 requests==2.34.2
+scikit-learn==1.9.1
 sep==1.4.1
 streamlit==1.66.1
 uvicorn==0.54.0

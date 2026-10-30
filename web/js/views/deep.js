@@ -174,6 +174,18 @@ export function createDeep(ctx) {
       const siblings = order.map((i, k) => objectTarget(i, k + 1));
       ctx.inspect({ ...siblings[order.indexOf(hit.index)], siblings });
     },
+    // Jump to one object (the agent's "Look"): open its image, then inspect the nearest detection.
+    async openAt(imageId, u, v) {
+      if (!list.length || !list.some((im) => im.id === imageId)) await loadList();
+      const i = list.findIndex((im) => im.id === imageId);
+      if (i < 0) return false;
+      if (!current || current.meta.id !== imageId) await show(i);
+      let best = -1, bd = Infinity;
+      current.det.rows.forEach((r, k) => { const d = (r[0] - u) ** 2 + (r[1] - v) ** 2; if (d < bd) { bd = d; best = k; } });
+      if (best < 0) return false;
+      this.pick(null, { index: best });
+      return true;
+    },
     items: () => list.map((im) => ({ label: `${im.source.toUpperCase()} · ${im.target}`, sub: `${im.stats.n_galaxies || 0} galaxies` })),
     get itemIndex() { return index; },
     selectItem(i) { return show(i); },
