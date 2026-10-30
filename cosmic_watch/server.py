@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
 
-from . import agent, anomaly, db, deepzoom
+from . import agent, anomaly, db, deepzoom, explain
 from .config import DATA, INTERVALS, ROOT
 from .ml import infer as cnn
 from .ml.classes import CLASSES as CNN_CLASSES, COARSE as CNN_COARSE
@@ -246,6 +246,19 @@ def detection_cnn(det_id: int):
             "top": [[CNN_CLASSES[i], probs[i]] for i in order[:4]],
             "coarse": {k: round(sum(probs[i] for i in idx), 4) for k, idx in CNN_COARSE.items()},
             "model": cnn.version()}
+
+
+@app.get("/api/explain/detection/{det_id}")
+def explain_detection(det_id: int):
+    """The Cosmic Agent's explanation of one detection: verdict, evidence, background knowledge."""
+    con = db.connect()
+    try:
+        out = explain.explain(con, det_id)
+    finally:
+        con.close()
+    if out is None:
+        raise HTTPException(404)
+    return out
 
 
 @app.get("/api/images/{image_id}/crop")

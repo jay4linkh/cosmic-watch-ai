@@ -41,6 +41,7 @@ JPEG_Q = 90
 SCIENCE_Q = 95            # compressed only after stretching, so faint sky keeps its real grain
 IMG_TILE_VERSION = 3      # bump when tile processing changes (old tiles are then ignored)
 MAST_FILE = "https://mast.stsci.edu/api/v0.1/Download/file"
+SCIENCE_MAX_BYTES = 700_000_000   # big mosaics (several GB) stay on the preview
 
 # ---------- JWST / Hubble pyramids ----------
 #
@@ -137,6 +138,8 @@ def _fetch_science(image_id):
                     if resp.status_code != 200:
                         continue
                     total = int(resp.headers.get("Content-Length") or 0)
+                    if total > SCIENCE_MAX_BYTES:
+                        raise RuntimeError(f"science mosaic is {total / 1e9:.1f} GB; keeping the preview")
                     got = 0
                     with open(part, "wb") as f:
                         for chunk in resp.iter_content(1 << 20):
