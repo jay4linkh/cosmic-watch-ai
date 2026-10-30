@@ -62,6 +62,24 @@ CREATE TABLE IF NOT EXISTS user_labels (
     ai_label TEXT,                   -- what the AI said (for agreement stats / training)
     created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS anomalies (
+    id INTEGER PRIMARY KEY,
+    key TEXT NOT NULL UNIQUE,
+    source TEXT NOT NULL,
+    kind TEXT NOT NULL,              -- sun_brightening | sun_activity_change | deep_outlier | tde_candidate | classifier_disagreement
+    score REAL,                      -- 0..1, how unusual
+    title TEXT, reason TEXT,
+    hypotheses TEXT,                 -- JSON list of "it could be ..."
+    ref TEXT,                        -- JSON pointer back to the object (view, ids, position)
+    status TEXT DEFAULT 'new',       -- new | looked | dismissed
+    created_at TEXT NOT NULL,
+    feedback_at TEXT
+);
+CREATE TABLE IF NOT EXISTS agent_prefs (   -- Beta(alpha, beta) interest per anomaly kind
+    kind TEXT PRIMARY KEY,
+    alpha REAL NOT NULL DEFAULT 1,
+    beta REAL NOT NULL DEFAULT 1
+);
 CREATE INDEX IF NOT EXISTS idx_det_image ON detections(image_id);
 CREATE INDEX IF NOT EXISTS idx_alerts_mjd ON alerts(lastmjd);
 """

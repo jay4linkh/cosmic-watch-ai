@@ -58,8 +58,12 @@ Built with Three.js (WebGL + bloom), served by FastAPI. Four worlds, all from li
 |---|---|---|
 | **Observatory** | Telescopes → AI detectors → discoveries as glowing planets; every pulse along the orbits is real data arriving | spreads the system apart |
 | **Deep Field** | The newest public JWST/Hubble image, with every AI detection as a particle | pulls the image apart: galaxies recede by brightness, stars come forward, callouts mark the biggest galaxies |
-| **Black Holes** | A live accretion disk with real Rubin/ZTF candidate cut-outs (TDE / AGN / QSO / Blazar) in orbit; click one for details | widens the orbits |
+| **Black Holes** | A live accretion disk with real Rubin/ZTF candidate cut-outs (TDE / AGN / QSO / Blazar) in orbit | widens the orbits |
 | **The Sun** | The latest SDO image wrapped on a sphere, AI-detected active regions ringed | raises magnetic loops off the surface and pushes out the solar wind |
+
+**Inspect mode**: click (or point and hold) any galaxy or black-hole card. You get an illustrative 3D model built from the AI's
+measurements next to the real telescope pixels. Zoom past halfway and the **real image fills the screen** (sharper crops load
+as you zoom; drag or pinch turns it). Then **classify it yourself**; your labels are saved as training data.
 
 Plus a live event trace, source health, a guided tour, and keyboard shortcuts (`1`–`4` views, `Space` explode, `←/→` items, `H` hand mode).
 
@@ -79,6 +83,41 @@ Hand tracking runs **entirely in your browser** with [MediaPipe](https://ai.goog
 
 The camera needs `localhost` or HTTPS. Good, even lighting helps; there's a sensitivity setting in the side panel.
 
+## 🤖 The Cosmic Agent: anomaly detection that learns what you like
+
+`cosmic_watch/anomaly.py` runs after every fetch:
+
+| Source | Method | Flags |
+|---|---|---|
+| **Sun** (AIA 131/94/171/193/304 Å) | Frame differencing between consecutive images: exposure-normalised, a big absolute rise **and** ratio **and** area (thresholds tuned on live data so solar rotation doesn't trigger it), plus robust z-scores of each channel's activity vs its own history | sudden brightenings (possible flares), activity jumps |
+| **Deep fields** | **Isolation Forest** (unsupervised ML) over every detection's brightness, size, ellipticity and size vs PSF | the odd ones out: possible lensing arcs, mergers, edge-on disks, artifacts |
+| **Alerts** | High-probability TDEs; **classifier vs CV disagreement** (broker says *bogus*, our difference-image S/N says real) | candidates worth a second look |
+
+`cosmic_watch/agent.py` then picks what to show you with a **Thompson-sampling bandit** (reinforcement learning for
+choosing between options): each anomaly kind has a Beta(α, β) "interest" belief; **Look** is a reward, **Not now** is
+not. It explores kinds it's unsure about and exploits the ones you keep opening. The agent card in the app says
+*"This looks interesting… It could be X, Y or Z. Want to look?"* and **Look** flies you straight to the object in Inspect mode.
+
+> Why a bandit and not "full" RL? There's no environment to act in or long-horizon reward here, just a choice of
+> what to show next and a yes/no signal from you. That's exactly the contextual-bandit setting.
+
+## Computer vision & AI used in this project
+
+| Technique | Where |
+|---|---|
+| Background estimation + source extraction (segmentation, deblending) | `detectors/galaxies.py` (SEP) |
+| Morphological measurement: half-light radius, ellipticity, PSF estimation | `detectors/galaxies.py` |
+| Masking: footprint detection, edge rejection, diffraction-spike suppression | `detectors/galaxies.py` |
+| Disk fitting, limb-darkening correction, adaptive thresholding, connected components, morphological opening | `detectors/sun.py` |
+| Image differencing / change detection, robust statistics (median, MAD, σ-clipping) | `detectors/stamps.py`, `anomaly.py` |
+| Unsupervised anomaly detection (Isolation Forest) | `anomaly.py` |
+| Reinforcement learning (Thompson-sampling bandit) | `agent.py` |
+| Deep-learning hand-landmark CNN (MediaPipe), One-Euro filtering, gesture state machine with hysteresis | `web/js/hands.js` |
+| Human-in-the-loop labelling (Galaxy Zoo style) → training data | Inspect mode, `/api/labels` |
+| Third-party ML classifiers (ALeRCE stamp + light-curve classifiers) | alert classes |
+
+Next step: train our own CNN on Galaxy Zoo + your labels, and an autoencoder for image-level anomalies.
+
 ## Deploy (live link)
 
 The repo includes a Render blueprint (`render.yaml`): in Render choose **New + → Blueprint**, pick this repo, and it builds and
@@ -93,6 +132,8 @@ cosmic_watch/
 ├── db.py                # SQLite: images, detections, alerts, runs
 ├── pipeline.py          # fetch -> detect -> store loop (CLI)
 ├── server.py            # FastAPI: JSON API + serves the 3D web app
+├── anomaly.py           # Sun flares/activity, deep-field outliers, alert disagreements
+├── agent.py             # the Cosmic Agent: suggestions + bandit learning
 ├── fetchers/
 │   ├── alerts.py        # Rubin + ZTF via ALeRCE
 │   ├── mast.py          # JWST + Hubble new releases
@@ -107,6 +148,7 @@ web/                     # 3D observatory (Three.js) + hand tracking (MediaPipe)
 └── js/
     ├── main.js          # app shell, camera, picking, live polling, tour
     ├── hands.js         # webcam hand tracking -> gestures
+    ├── inspect.js       # Inspect mode: 3D models + real pixels + full-screen zoom
     ├── fx.js            # glow shaders, starfield, helpers
     └── views/           # observatory · deep · blackholes · sun
 dashboard/app.py         # Streamlit analyst dashboard
@@ -122,6 +164,7 @@ data/                    # downloaded images + database (git-ignored)
 - [x] **Phase 3, Black-hole watch**: TDE / AGN / QSO / Blazar candidates from broker classes
 - [x] **Phase 4, Live dashboard**
 - [x] **Phase 4b, 3D observatory + hand-gesture control**
+- [x] **Phase 4c, Inspect mode, your own classifications, anomaly detection + learning agent**
 - [ ] **Phase 5, Trained models**: replace the rule-based galaxy labels with a CNN trained on Galaxy Zoo (or Zoobot); our own real/bogus CNN on alert cutouts
 - [ ] **Phase 6**: gravitational-lens finder, anomaly detection (autoencoder), galaxy similarity search (DINOv2/CLIP)
 - [ ] Rubin via Fink as a second broker (its API was timing out when v0 was built)

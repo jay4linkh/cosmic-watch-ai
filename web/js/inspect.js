@@ -209,6 +209,10 @@ export function createInspector(ctx) {
   let target = null, model = null, card = null, tags = [];
   let token = null;
   let cropStep = 0, cropLoading = false;
+  let fullness = 0;                                  // 0 = card beside the model, 1 = real image fills the screen
+  const tilt = new THREE.Euler(0, 0, 0, 'YXZ');      // turn the photo in your hands while in full view
+  const tmpV = new THREE.Vector3(), tmpQ = new THREE.Quaternion(), side = new THREE.Vector3();
+  const easeIO = (x) => x * x * (3 - 2 * x);
 
   // Zooming in fetches a tighter, sharper crop of the real image (galaxies only).
   async function refreshCrop(step) {
@@ -216,7 +220,7 @@ export function createInspector(ctx) {
     if (!c || !card || cropLoading) return;
     cropLoading = true;
     const my = token;
-    const r = Math.max(0.003, c.r * (1 - step * 0.2));
+    const r = Math.max(0.0025, c.r * Math.pow(0.72, step));
     try {
       const tex = await loadTexture(`/api/images/${c.id}/crop?u=${c.u}&v=${c.v}&r=${r.toFixed(4)}&size=768`);
       if (my !== token || !card) { tex.dispose(); return; }
@@ -266,12 +270,15 @@ export function createInspector(ctx) {
         new THREE.LineBasicMaterial({ color: tg.color || 0x67e8f9 }));
       card.add(mesh, frame);
       card.userData.mesh = mesh;
+      card.userData.size = [w, h];
       cropStep = 0;
+      tilt.set(0, 0, 0);
       const cTag = label(`<span class="itag-k" style="color:#4ade80">REAL DATA</span>${tg.imageNote}`, 'itag');
       cTag.position.set(0, -h / 2 - 1.6, 0);
       card.add(cTag);
       tags.push(cTag);
-      card.position.set(tg.kind === 'bh' ? 21 : 17, 1, -2);
+      card.position.set(tg.kind === 'bh' ? 15 : 12.5, 1, -1);
+      card.userData.side = card.position.clone();
       group.add(card);
     } catch { /* image is optional; the model still shows */ }
   }
@@ -294,6 +301,9 @@ export function createInspector(ctx) {
       return open({ ...s[i], siblings: s });
     },
     select(i) { const s = target?.siblings; if (s?.[i]) return open({ ...s[i], siblings: s }); },
+    get fullness() { return fullness; },
+    // In full view, pinch/drag turns the photo itself instead of orbiting.
+    tiltBy(dx, dy) { tilt.y = Math.max(-1.1, Math.min(1.1, tilt.y + dx * 3)); tilt.x = Math.max(-1.1, Math.min(1.1, tilt.x + dy * 3)); },
     // Your classification reshapes the model (the real image stays).
     reshape(shape) {
       if (!target || target.kind !== 'galaxy') return;
@@ -317,12 +327,30 @@ export function createInspector(ctx) {
       }
       model.traverse((o) => { if (o.userData.billboard) o.quaternion.copy(ctx.camera.quaternion); });
       if (model.userData.billboard) model.quaternion.copy(ctx.camera.quaternion);
+      // Zoom past ~45 % and the real image flies to the centre and fills the screen.
+      fullness = Math.min(1, Math.max(0, (e - 0.45) / 0.5));
+      const f = easeIO(fullness);
       if (card) {
-        card.quaternion.slerp(ctx.camera.quaternion, 0.15);
-        card.scale.setScalar(1 + e * 0.5);
-        const step = Math.round(e * 4);
+        const cam = ctx.camera, D = 10;
+        const fwd = tmpV.set(0, 0, -1).applyQuaternion(cam.quaternion);
+        const center = cam.position.clone().addScaledVector(fwd, D);
+        side.copy(card.userData.side);
+        card.position.lerpVectors(side, center, f);
+        const [w, h] = card.userData.size;
+        const fillH = 2 * D * Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2), fillW = fillH * cam.aspect;
+        // galaxies cover the screen; 3-panel alert stamps fit inside it
+        const full = target.kind === 'bh' ? Math.min(fillW / w, fillH / h) * 0.96 : Math.max(fillW / w, fillH / h) * 1.02;
+        card.scale.setScalar((1 + Math.min(e, 0.45) * 0.6) * (1 - f) + full * f);
+        tmpQ.setFromEuler(tilt);
+        const facing = cam.quaternion.clone().multiply(tmpQ);
+        card.quaternion.slerp(facing, 0.18);
+        if (fullness < 0.95) tilt.x *= 0.9, tilt.y *= 0.9;   // tilt only sticks in full view
+        const step = Math.round(e * 6);
         if (step !== cropStep) refreshCrop(step);
       }
+      model.visible = fullness < 0.92;
+      model.scale.setScalar(1 - f * 0.7);
+      tags.forEach((t, k) => { if (k === 0) t.element.style.opacity = 1 - f; });
     },
     items() {
       return (target?.siblings || []).map((s) => ({ label: s.short, sub: s.badge }));

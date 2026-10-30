@@ -7,9 +7,11 @@ const CHANNEL = {
   '0171': { name: 'AIA 171 Å', desc: 'Quiet corona and coronal loops (~600 000 °C)', glow: 0xffc94d },
   '0193': { name: 'AIA 193 Å', desc: 'Hot corona and dark coronal holes (~1.2 million °C)', glow: 0xe8b07a },
   '0304': { name: 'AIA 304 Å', desc: 'Chromosphere and prominences (~50 000 °C)', glow: 0xff5a36 },
+  '0131': { name: 'AIA 131 Å', desc: 'Flaring plasma (~10 million °C): flares light up here first', glow: 0x2dd4bf },
+  '0094': { name: 'AIA 94 Å', desc: 'Hot flare loops (~6 million °C)', glow: 0x4ade80 },
   HMIIC: { name: 'HMI visible light', desc: 'The photosphere: where sunspots show', glow: 0xffa040 },
 };
-const ORDER = ['0171', '0193', '0304', 'HMIIC'];
+const ORDER = ['0171', '0193', '0304', '0131', '0094', 'HMIIC'];
 const MAX_TAGS = 7;      // label only the biggest regions; the rest get rings
 
 // Front hemisphere = the SDO disk, projected orthographically; the back gets a dimmed mirror.
@@ -74,6 +76,7 @@ export function createSun(ctx) {
 
   async function show(i) {
     if (!channels.length) return;
+    beacon = null;
     index = (i + channels.length) % channels.length;
     const ch = channels[index];
     const tex = await loadTexture(ch.image_url);
@@ -122,6 +125,29 @@ export function createSun(ctx) {
     ctx.onInfoChange();
   }
 
+  // A pulsing beacon where the agent spotted something.
+  let beacon = null;
+  function placeBeacon(ch, x, y) {
+    if (beacon) { cur.root.remove(beacon); beacon = null; }
+    const [w, h] = ch.stats.size || [1024, 1024];
+    const [cx, cy] = ch.stats.disk_center_px || [w / 2, h / 2];
+    const rpx = ch.stats.disk_radius_px || w * 0.4;
+    const dx = (x - cx) / rpx, dy = -(y - cy) / rpx, rr = Math.min(0.97, dx * dx + dy * dy);
+    const n = new THREE.Vector3(dx, dy, Math.sqrt(1 - rr)).normalize();
+    beacon = new THREE.Group();
+    const ring = new THREE.Mesh(new THREE.RingGeometry(1.4, 1.62, 64), new THREE.MeshBasicMaterial({ color: 0xff3b6b, transparent: true, side: THREE.DoubleSide, depthWrite: false }));
+    beacon.add(ring, glowSprite(0xff3b6b, 6, 0.6));
+    const tag = label('<span class="callout-k">!</span>agent: look here', 'callout');
+    tag.element.style.setProperty('--c', '#ff3b6b');
+    tag.position.set(0, 3, 0);
+    beacon.add(tag);
+    beacon.position.copy(n).multiplyScalar(R * 1.01);
+    beacon.lookAt(n.clone().multiplyScalar(R * 3));
+    beacon.userData.n = n;
+    cur.root.add(beacon);
+    return n;
+  }
+
   let lastE = -1;
   function applyExplode(e) {
     if (!cur) return;
@@ -159,7 +185,8 @@ export function createSun(ctx) {
     async enter() { if (!channels.length) await this.load(); },
     update(dt, t, e) {
       if (Math.abs(e - lastE) > 1e-4) { applyExplode(e); lastE = e; }
-      if (cur) cur.root.rotation.y = Math.sin(t * 0.08) * 0.35;  // gentle wobble shows off the limb
+      if (cur) cur.root.rotation.y = beacon ? 0 : Math.sin(t * 0.08) * 0.35;  // gentle wobble shows off the limb
+      if (beacon) { const k = 1 + 0.25 * Math.sin(t * 5); beacon.children[0].scale.setScalar(k); }
       const P = wg.attributes.position.array, C = wg.attributes.aColor.array, A = wg.attributes.aAlpha.array;
       const glow = new THREE.Color(cur?.info.glow || 0xffaa55);
       for (let i = 0; i < WIND; i++) {
@@ -177,6 +204,18 @@ export function createSun(ctx) {
       return `<b>${r.d.label === 'sunspot' ? 'Sunspot' : 'Active region'} #${r.k + 1}</b><br><span>area ${fmt(Math.round(4 * r.d.a * r.d.b))} px² · brightness ${r.d.score?.toFixed(2)}</span>`;
     },
     pick() {},
+    async focusOn(channel, x, y) {
+      if (!channels.length) await this.load();
+      const all = await api('/api/sun');
+      channels = ORDER.map((f) => all.find((c) => c.filter === f)).filter(Boolean);
+      const i = channels.findIndex((c) => c.filter === channel);
+      if (i < 0) return false;
+      await show(i);
+      if (x == null) return true;
+      const n = placeBeacon(channels[i], x, y);
+      ctx.flyTo({ pos: n.clone().multiplyScalar(R * 2.6).toArray(), target: n.clone().multiplyScalar(R * 0.5).toArray() }, 1600);
+      return true;
+    },
     items: () => channels.map((c) => ({ label: (CHANNEL[c.filter] || {}).name || c.filter, sub: timeAgo(c.obs_time) })),
     get itemIndex() { return index; },
     selectItem(i) { return show(i); },

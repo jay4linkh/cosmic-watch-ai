@@ -9,7 +9,7 @@ import logging
 import time
 import traceback
 
-from . import db
+from . import anomaly, db
 from .config import INTERVALS, RUBIN_STAMPS_PER_CLASS, STAMP_DIR
 from .detectors import galaxies, stamps, sun
 from .fetchers import alerts, mast, sdo
@@ -32,7 +32,7 @@ def run_sdo(con) -> int:
         if rec["mode"] == "sunspots":
             img, regs, stats = sun.sunspots(rec["path"])
         else:
-            n_sigma = 5.0 if rec["filter"] == "0304" else 3.0
+            n_sigma = 5.0 if rec["filter"] in ("0304", "0131", "0094") else 3.0
             img, regs, stats = sun.active_regions(rec["path"], n_sigma=n_sigma)
         out = sun.annotate(img, regs, _annotated_path(rec["path"]))
         db.insert_image(con, rec, out, stats, regs)
@@ -120,6 +120,12 @@ def run_source(con, name: str) -> bool:
         n = SOURCES[name](con)
         db.finish_run(con, run_id, "ok", n)
         log.info("[%s] ok, %d new", name, n)
+        try:
+            k = anomaly.run_for(con, name)
+            if k:
+                log.info("[%s] %d new anomalies", name, k)
+        except Exception as e:      # anomaly checks must never break fetching
+            log.warning("[%s] anomaly checks failed: %s", name, e)
         return True
     except Exception as e:
         db.finish_run(con, run_id, "error", 0, f"{e}\n{traceback.format_exc(limit=2)}")
