@@ -1,5 +1,5 @@
 :root {
-  --bg: #02030a;
+  --bg: #000002;
   --ink: #e6edf7;
   --ink-2: #a9b6cc;
   --ink-3: #6b7a93;
@@ -34,6 +34,10 @@ kbd { font-family: var(--mono); font-size: 10px; padding: 1px 5px; border: 1px s
 
 body.hand-mode #cam, body.hand-mode #cam-shade { opacity: 1; }
 body.hand-mode #stage { mix-blend-mode: screen; }   /* black becomes transparent: a hologram over the camera */
+/* While a hand is interacting, the room fades to black: only space remains. */
+body.hand-mode.hands-active #cam { opacity: 0; transition: opacity .9s; }
+body.hand-mode.hands-active #cam-shade { opacity: 0; }
+body.hand-mode.hands-active #stage { mix-blend-mode: normal; }
 
 /* ---------- top bar ---------- */
 #topbar { position: fixed; top: 0; left: 0; right: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between;
@@ -170,7 +174,7 @@ body.hand-mode .hand-panel { display: block; }
 
 /* ---------- splash & tour ---------- */
 #splash { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
-  background: radial-gradient(ellipse at center, #0b1430, var(--bg) 70%); transition: opacity .8s; }
+  background: radial-gradient(ellipse at center, #0c0c14, var(--bg) 70%); transition: opacity .8s; }
 #splash.gone { opacity: 0; pointer-events: none; }
 .splash-ring { position: relative; width: 90px; height: 90px; }
 .splash-ring span { position: absolute; inset: 0; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--cyan); animation: spin 1.4s linear infinite; }
@@ -206,3 +210,27 @@ body.hand-mode .hand-panel { display: block; }
   #hud { display: none; }
   #detail { left: 16px; right: 16px; width: auto; }
 }
+
+/* ---------- inspect mode ---------- */
+#inspect-bar { position: fixed; top: 72px; left: 50%; transform: translateX(-50%); z-index: 9; display: none; align-items: center; gap: 14px;
+  padding: 6px 8px 6px 6px; border-radius: 999px; background: var(--glass); border: 1px solid var(--line); backdrop-filter: blur(14px); white-space: nowrap; }
+body.inspecting #inspect-bar { display: flex; }
+.inspect-back { border: 1px solid rgba(103,232,249,0.4); background: rgba(103,232,249,0.1); color: var(--ink); border-radius: 999px; padding: 6px 14px; cursor: pointer; font-size: 12.5px; }
+.inspect-back b { font-weight: 600; color: var(--cyan); }
+.inspect-hints { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); padding-right: 8px; }
+body.inspecting #trace { opacity: 0.35; }
+.itag { font-size: 11.5px; color: var(--ink-2); white-space: nowrap; text-shadow: 0 0 10px #000; padding: 3px 9px; border-radius: 6px; background: rgba(0,0,0,0.45); border: 1px solid var(--line); }
+.itag-k { font-family: var(--mono); font-size: 10px; letter-spacing: 0.14em; color: var(--gold); margin-right: 8px; }
+
+.classify { margin-top: 14px; }
+.classify:empty { display: none; }
+.classify-ai { font-size: 12.5px; color: var(--ink-2); margin: 8px 0 10px; }
+.classify-ai b { color: var(--cyan); font-weight: 600; }
+.classify-ai b.mine { color: var(--green); }
+.classify-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.classify-grid button { padding: 9px 4px; border-radius: 10px; border: 1px solid var(--line-2); background: rgba(148,182,255,0.06); cursor: pointer; font-size: 12px; transition: all .15s; }
+.classify-grid button:hover { border-color: var(--cyan); }
+.classify-grid button.on { background: linear-gradient(135deg, rgba(74,222,128,0.25), rgba(103,232,249,0.2)); border-color: var(--green); color: #fff; }
+
+/* a button under your pointing finger */
+.hand-hover { outline: 2px solid var(--cyan) !important; outline-offset: 2px; box-shadow: 0 0 22px rgba(103,232,249,0.6) !important; }

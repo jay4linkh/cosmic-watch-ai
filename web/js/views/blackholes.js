@@ -85,6 +85,30 @@ export function createBlackHoles(ctx) {
 
   let hovered = null;
 
+  const MODEL_NOTE = {
+    TDE: 'a star shredded into a stream, spiralling in',
+    AGN: 'feeding black hole: hot disk + jets',
+    QSO: 'quasar: blazing disk + long jets',
+    Blazar: 'jet pointed straight at Earth',
+  };
+  function alertTarget(a) {
+    return {
+      key: `${a.survey}:${a.oid}`,
+      kind: 'bh', cls: a.cls, seed: Number(String(a.oid).replace(/\D/g, '').slice(-7)) || 1,
+      color: CLASS_COLOR[a.cls] || 0xffffff,
+      short: `${a.cls} ${String(a.oid).slice(-6)}`, badge: a.probability.toFixed(2),
+      kicker: `${a.cls} · ${a.survey === 'lsst' ? 'RUBIN' : 'ZTF'} · INSPECT`,
+      title: String(a.oid),
+      sub: `${CLASS_INFO[a.cls] || ''}. Right: the real ${a.survey === 'lsst' ? 'Rubin' : 'ZTF'} cut-outs (science · template · difference). Left: a 3D model of this kind of event. Is it real? Classify it yourself.`,
+      stats: [['Probability', a.probability.toFixed(2)], ['Last seen', timeAgo(a.last_seen)], ['Detections', fmt(a.n_det)],
+              ['AI diff S/N', a.diff_snr != null ? String(Math.round(a.diff_snr)) : '—'],
+              ['RA', a.ra.toFixed(4)], ['Dec', `${a.dec >= 0 ? '+' : ''}${a.dec.toFixed(4)}`]],
+      imageUrl: a.stamp_url,
+      imageNote: `${a.survey === 'lsst' ? 'Rubin' : 'ZTF'} alert cut-outs`,
+      modelNote: `${MODEL_NOTE[a.cls] || 'black hole'} · illustrative`,
+    };
+  }
+
   return {
     name: 'bh',
     title: 'Black Hole Watch',
@@ -134,20 +158,10 @@ export function createBlackHoles(ctx) {
     pick(obj) {
       const a = obj.userData.alert;
       if (!a) return;
-      ctx.showDetail(`
-        <div class="detail-kicker" style="color:#${(CLASS_COLOR[a.cls] || 0xffffff).toString(16).padStart(6, '0')}">${a.cls} · ${a.survey.toUpperCase()}</div>
-        <h3>${a.oid}</h3>
-        <p>${CLASS_INFO[a.cls] || ''}</p>
-        <img src="${a.stamp_url}" alt="cut-outs">
-        <div class="detail-grid">
-          <span>Probability</span><b>${a.probability.toFixed(2)}</b>
-          <span>Last seen</span><b>${timeAgo(a.last_seen)}</b>
-          <span>Detections</span><b>${fmt(a.n_det)}</b>
-          <span>AI diff S/N</span><b>${a.diff_snr != null ? Math.round(a.diff_snr) : '—'}</b>
-          <span>RA / Dec</span><b>${a.ra.toFixed(4)}, ${a.dec >= 0 ? '+' : ''}${a.dec.toFixed(4)}</b>
-          <span>Classifier</span><b>${a.classifier}</b>
-        </div>
-        <a class="btn" href="${a.broker_url}" target="_blank" rel="noopener">Open in broker ↗</a>`);
+      // Dive in: 3D model of this kind of black-hole event next to the real cut-outs.
+      const shown = cards.map((c) => c.userData.mesh.userData.alert);
+      const siblings = shown.map(alertTarget);
+      ctx.inspect({ ...alertTarget(a), siblings });
     },
     items: () => FILTERS.map((f) => ({ label: f, sub: f === 'All' ? `${all.length}` : `${all.filter((a) => a.cls === f).length}` })),
     get itemIndex() { return filter; },

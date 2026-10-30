@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
+from pydantic import BaseModel, Field
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from PIL import Image
@@ -218,6 +219,29 @@ def detections(image_id: int, limit: int = Query(4000, le=20000)):
     }
 
 
+@app.get("/api/images/{image_id}/crop")
+def crop(image_id: int, u: float = Query(ge=0, le=1), v: float = Query(ge=0, le=1),
+         r: float = Query(0.02, gt=0, le=0.5), size: int = Query(512, ge=128, le=1024)):
+    """Full-resolution close-up around (u, v): the real pixels behind one detection."""
+    img = rows("SELECT path FROM images WHERE id=?", (image_id,))
+    if not img:
+        raise HTTPException(404)
+    src = Path(img[0]["path"])
+    src = src if src.is_absolute() else ROOT / src
+    if not src.is_file():
+        raise HTTPException(404)
+    out = THUMB_DIR / "crops" / f"{image_id}_{u:.4f}_{v:.4f}_{r:.4f}_{size}.jpg"
+    if not out.exists():
+        out.parent.mkdir(parents=True, exist_ok=True)
+        im = Image.open(src)
+        W, H = im.size
+        half = max(int(r * W), 40)
+        cx, cy = int(u * W), int(v * H)
+        box = (max(0, cx - half), max(0, cy - half), min(W, cx + half), min(H, cy + half))
+        im.crop(box).convert("RGB").resize((size, size), Image.LANCZOS).save(out, quality=90)
+    return FileResponse(out, headers={"Cache-Control": "public, max-age=86400"})
+
+
 @app.get("/api/sun")
 def sun():
     latest = rows("""SELECT i.* FROM images i JOIN (SELECT filter, MAX(id) id FROM images WHERE source='sdo' GROUP BY filter) m
@@ -248,6 +272,35 @@ def alerts(bh: bool = False, survey: str | None = None, cls: str | None = None,
     order = "CASE cls WHEN 'TDE' THEN 0 ELSE 1 END, lastmjd DESC" if bh else "lastmjd DESC"
     return [alert_out(r) for r in rows(
         f"SELECT * FROM alerts WHERE {' AND '.join(where)} ORDER BY {order} LIMIT ?", (*params, limit))]
+
+
+class LabelIn(BaseModel):
+    key: str = Field(max_length=120)
+    kind: str = Field(pattern="^(galaxy|bh)$")
+    label: str = Field(max_length=40)
+    ai_label: str | None = Field(default=None, max_length=40)
+
+
+@app.post("/api/labels")
+def add_label(body: LabelIn):
+    """Save a person's classification (latest answer wins). These become training labels."""
+    con = db.connect()
+    try:
+        con.execute("""INSERT INTO user_labels (key, kind, label, ai_label, created_at) VALUES (?,?,?,?,?)
+                       ON CONFLICT (key) DO UPDATE SET label=excluded.label, created_at=excluded.created_at""",
+                    (body.key, body.kind, body.label, body.ai_label, db.utcnow()))
+        con.commit()
+        total = con.execute("SELECT COUNT(*) FROM user_labels").fetchone()[0]
+    finally:
+        con.close()
+    return {"ok": True, "total": total}
+
+
+@app.get("/api/labels")
+def label_stats():
+    by = rows("SELECT kind, label, COUNT(*) n FROM user_labels GROUP BY kind, label ORDER BY n DESC")
+    return {"total": sum(r["n"] for r in by), "by_label": by,
+            "recent": rows("SELECT key, kind, label, ai_label, created_at FROM user_labels ORDER BY id DESC LIMIT 20")}
 
 
 # ---------- files ----------

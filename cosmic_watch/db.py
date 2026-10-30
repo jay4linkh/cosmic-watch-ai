@@ -54,6 +54,14 @@ CREATE TABLE IF NOT EXISTS runs (
     n_new INTEGER DEFAULT 0,
     message TEXT
 );
+CREATE TABLE IF NOT EXISTS user_labels (
+    id INTEGER PRIMARY KEY,
+    key TEXT NOT NULL UNIQUE,        -- "<image_id>:<detection index>" or "<survey>:<oid>"
+    kind TEXT NOT NULL,              -- galaxy | bh
+    label TEXT NOT NULL,             -- what the person said
+    ai_label TEXT,                   -- what the AI said (for agreement stats / training)
+    created_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_det_image ON detections(image_id);
 CREATE INDEX IF NOT EXISTS idx_alerts_mjd ON alerts(lastmjd);
 """
