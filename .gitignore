@@ -6,4 +6,6 @@ venv/
 .ipynb_checkpoints/
 *.fits
 *.fits.gz
+*.part
 runs/
+.claude/
