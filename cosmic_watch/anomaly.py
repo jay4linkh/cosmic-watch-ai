@@ -18,6 +18,7 @@ Each finding goes into the `anomalies` table with a score, a plain-English reaso
 and a pointer back to the object, so the agent can suggest it and the app can open it.
 """
 import json
+import time
 import logging
 
 import cv2
@@ -415,9 +416,27 @@ def run_mars(con) -> int:
     return n
 
 
+def run_learn(con) -> int:
+    """The agent asks you to teach it when it has a backlog of genuinely hard cases."""
+    from .ml import active
+    q = active.queue(con, 30)
+    hard = [c for c in q if c["score"] >= 0.75]
+    if len(hard) < 8:
+        return 0
+    window = time.strftime("%Y-%m-%d") + f"-{int(time.strftime('%H')) // 6}"
+    return record(con, {
+        "key": f"learn:{window}", "source": "learn", "kind": "teach_request",
+        "score": round(min(1.0, 0.4 + len(hard) / 60), 3),
+        "title": f"Teach me: {len(hard)} objects I'm unsure about",
+        "reason": f"My galaxy CNN can't decide on {len(hard)} recent objects (for example: {hard[0]['reason'][:120]}). "
+                  "A few answers from you and I retrain myself on this laptop's GPU.",
+        "hypotheses": ["galaxies of an unclear type", "stars or nebula gas that only look like galaxies", "image artifacts"],
+        "ref": {"view": "deep", "teach": True}})
+
+
 def run_for(con, source: str) -> int:
     """Called by the pipeline after each source run."""
-    extra = {"spacewx": run_spacewx, "gw": run_gw, "gcn": run_gcn, "neo": run_neo, "mars": run_mars}
+    extra = {"learn": run_learn, "spacewx": run_spacewx, "gw": run_gw, "gcn": run_gcn, "neo": run_neo, "mars": run_mars}
     if source in extra:
         return extra[source](con)
     if source == "sdo":

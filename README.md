@@ -83,6 +83,27 @@ The older analyst dashboard is still there: `streamlit run dashboard/app.py` (po
 The agent watches all of it: M/X flares, geomagnetic storms, CME candidates, new gravitational-wave events, gamma-ray
 bursts and neutrinos, asteroids inside the Moon's orbit and Mars science finds all become suggestions.
 
+## 🔁 Active learning: the galaxy CNN improves while the project runs
+
+`cosmic_watch/ml/active.py`, driven by the pipeline's `learn` step every 20 minutes:
+
+1. **Ask.** Every prediction gets an acquisition score (entropy and top-2 margin, plus a bonus when the field may not hold
+   galaxies at all: nebulae, emission-line filters). The most informative objects form a **Teach me** queue (Deep Field
+   panel or `T`; answer with keys 1-7 or by pointing in hand mode), and the agent asks for help when the backlog grows.
+2. **Learn.** After 15 new labels (or a daily refresh when new images arrived) a short fine-tune runs in a background
+   process on the GPU, starting from the current champion, on Galaxy10, your labels (weighted 3x), weak labels
+   (detector-confirmed bright stars and flat nebula patches = "Not a galaxy") and pseudo-labels (galaxies the CNN is
+   already sure of in clean deep fields, so the new class does not swallow real galaxies). The model gains an **11th class,
+   "Not a galaxy"**, which Galaxy10 never had.
+3. **Gate.** Champion vs challenger on held-out data: Galaxy10 accuracy may not drop more than 1.5 points, accuracy on your
+   held-out labels may not drop, held-out stars/gas must be rejected (recall at least 60%) and at most 10% of held-out real
+   galaxies may be called "not a galaxy".
+4. **Swap.** A passing model goes to `data/models/galaxy_cnn_live.onnx`; the pipeline and server pick it up automatically
+   and re-classify the newest images. Every round is logged in `data/models/registry.json` and shown in the panel.
+
+The Deep Field counter now shows **likely galaxies**: extended sources minus those the CNN rejects, excluding Solar
+System targets (planet images are also skipped at download).
+
 ## 🔴 Our Mars CNN
 
 `cosmic_watch/ml/mars_train.py` fine-tunes an ImageNet ConvNeXt-Tiny on NASA/JPL's labelled Curiosity images

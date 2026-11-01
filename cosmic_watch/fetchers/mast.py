@@ -1,5 +1,6 @@
 """Newly public JWST and Hubble images from the MAST archive."""
 import logging
+import re
 import time
 
 import requests
@@ -22,6 +23,15 @@ def _score(row) -> int:
     return (2 if f in ("detection", "total") else 1) + (2 if combined else 0)
 
 
+# Solar System targets (planets, moons, comets) are not deep fields: their "galaxies" would be glare and moons.
+SOLAR_SYSTEM = re.compile(r"\b(JUPITER|SATURN|URANUS|NEPTUNE|MARS|VENUS|MERCURY|PLUTO|MOON|LUNA|IO|EUROPA|GANYMEDE|CALLISTO|"
+                          r"TITAN|ENCELADUS|TRITON|COMET|ASTEROID|KBO|CENTAUR|SOLAR SYSTEM|PLANET)\b", re.I)
+
+
+def is_solar_system(target, classification=""):
+    return bool(SOLAR_SYSTEM.search(f"{target} {classification}".replace("-", " ")))
+
+
 def find_new(days: float = MAST_LOOKBACK_DAYS):
     """Return recently released science images, one per (mission, target, instrument), newest first."""
     now = Time.now().mjd
@@ -33,6 +43,8 @@ def find_new(days: float = MAST_LOOKBACK_DAYS):
         )
         for row in obs:
             if not str(row["jpegURL"]).startswith("mast:"):
+                continue
+            if is_solar_system(row["target_name"], row["target_classification"]):
                 continue
             key = (coll, str(row["target_name"]), str(row["instrument_name"]))
             best = picked.get(key)

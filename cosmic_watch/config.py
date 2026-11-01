@@ -22,6 +22,7 @@ INTERVALS = {
     "gcn": 15 * 60,      # GCN circulars: gamma-ray bursts, neutrinos, X-ray flashes
     "mars": 3 * 3600,    # Perseverance + Curiosity raw images (new every sol)
     "neo": 6 * 3600,     # JPL close approaches, Sentry, fireballs
+    "learn": 20 * 60,    # active learning: retrain the galaxy CNN when enough new labels arrived
 }
 
 # MAST: how far back to look for newly public images, and how many to process per run.

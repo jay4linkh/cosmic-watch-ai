@@ -13,3 +13,12 @@ COARSE = {
     "edge-on": [8, 9],
 }
 COARSE_OF = {i: k for k, idx in COARSE.items() for i in idx}
+
+# Active learning adds an 11th class the Galaxy10 data never had: stars, nebula gas, artifacts, planets.
+NOT_GALAXY = "Not a galaxy"
+CLASSES_ALL = CLASSES + [NOT_GALAXY]
+# what people can answer in the "teach me" queue -> (fine class index or None, coarse group or None)
+TEACH_LABELS = {
+    "spiral": (None, "spiral"), "elliptical": (None, "elliptical"), "edge-on": (None, "edge-on"), "merger": (None, "merger"),
+    "star": (10, None), "gas": (10, None), "artifact": (10, None),
+}

@@ -21,7 +21,7 @@ from PIL import Image
 from . import agent, anomaly, db, deepzoom, explain
 from .config import DATA, INTERVALS, ROOT
 from .ml import infer as cnn
-from .ml.classes import CLASSES as CNN_CLASSES, COARSE as CNN_COARSE
+from .ml.classes import CLASSES_ALL as CNN_CLASSES, COARSE as CNN_COARSE, NOT_GALAXY
 
 Image.MAX_IMAGE_PIXELS = None
 log = logging.getLogger("cosmic_watch")
@@ -30,7 +30,8 @@ WEB_DIR = ROOT / "web"
 THUMB_DIR = DATA / "thumbs"
 THUMB_VERSION = 2   # bump when thumbnail processing changes, so browsers refetch
 SOURCES = {"alerts": "Rubin + ZTF alerts", "sdo": "SDO · Sun", "mast": "JWST + Hubble", "spacewx": "Space weather",
-           "gw": "LIGO · gravitational waves", "gcn": "GCN · bursts & neutrinos", "mars": "Mars rovers", "neo": "Near-Earth asteroids"}
+           "gw": "LIGO · gravitational waves", "gcn": "GCN · bursts & neutrinos", "mars": "Mars rovers", "neo": "Near-Earth asteroids",
+           "learn": "Active learning"}
 BH_CLASSES = ("TDE", "AGN", "QSO", "Blazar")
 
 
@@ -147,8 +148,16 @@ def summary():
                         "interval_min": INTERVALS[key] // 60,
                         "message": (r or {}).get("message") if state == "error" else None})
 
-    imgs = rows("SELECT source, stats FROM images")
-    deep = [json.loads(i["stats"] or "{}") for i in imgs if i["source"] in ("jwst", "hst")]
+    imgs = rows("SELECT id, source, target, stats FROM images")
+    from .fetchers.mast import is_solar_system
+    solar = {i["id"] for i in imgs if i["source"] in ("jwst", "hst") and is_solar_system(i["target"])}
+    deep = [json.loads(i["stats"] or "{}") for i in imgs if i["source"] in ("jwst", "hst") and i["id"] not in solar]
+    # honest count: extended sources the CNN does not reject as "Not a galaxy", outside planet images
+    likely = rows(f"""SELECT COUNT(*) n FROM detections d JOIN images i ON i.id = d.image_id
+                      WHERE i.source IN ('jwst','hst') AND d.label LIKE '%galaxy%'
+                      AND (d.cnn_label IS NULL OR d.cnn_label != ?) {f"AND i.id NOT IN ({','.join(map(str, solar))})" if solar else ""}""",
+                  (NOT_GALAXY,))[0]["n"]
+    rejected = rows("SELECT COUNT(*) n FROM detections WHERE cnn_label = ?", (NOT_GALAXY,))[0]["n"]
     counts = {r["k"]: r["n"] for r in rows(
         "SELECT survey || ':' || cls AS k, COUNT(*) n FROM alerts GROUP BY survey, cls")}
     newest = rows("SELECT MAX(lastmjd) m FROM alerts WHERE survey='lsst'")[0]["m"]
@@ -161,7 +170,9 @@ def summary():
             "deep_images": len(deep),
             "jwst_images": sum(1 for i in imgs if i["source"] == "jwst"),
             "hst_images": sum(1 for i in imgs if i["source"] == "hst"),
-            "galaxies": sum(s.get("n_galaxies", 0) for s in deep),
+            "galaxies": likely,
+            "extended_sources": sum(s.get("n_galaxies", 0) for s in deep),
+            "not_galaxy": rejected,
             "stars": sum(s.get("n_stars", 0) for s in deep),
             "bh_candidates": sum(v for k, v in counts.items() if k.split(":")[1] in BH_CLASSES),
             "tde": sum(v for k, v in counts.items() if k.endswith(":TDE")),
@@ -335,6 +346,39 @@ def alert_context(survey: str, oid: str, xmatch: bool = True):
         except Exception as e:  # noqa: BLE001
             out["crossmatch_error"] = str(e)[:200]
     return out
+
+
+# ---------- active learning ----------
+
+@app.get("/api/learn/queue")
+def learn_queue(n: int = Query(20, le=60)):
+    """The galaxies the CNN is least sure about: answering these teaches it the most."""
+    from .ml import active
+    con = db.connect()
+    try:
+        return active.queue(con, n)
+    finally:
+        con.close()
+
+
+@app.get("/api/learn/status")
+def learn_status():
+    from .ml import active
+    con = db.connect()
+    try:
+        return active.status(con)
+    finally:
+        con.close()
+
+
+@app.post("/api/learn/retrain")
+def learn_retrain():
+    from .ml import active
+    con = db.connect()
+    try:
+        return {"message": active.maybe_retrain(con, force=True)}
+    finally:
+        con.close()
 
 
 @app.get("/api/explain/detection/{det_id}")

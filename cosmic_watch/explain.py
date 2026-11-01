@@ -23,7 +23,7 @@ import cv2
 import numpy as np
 
 from .config import DATA, ROOT
-from .ml.classes import CLASSES, COARSE
+from .ml.classes import CLASSES, CLASSES_ALL, COARSE, NOT_GALAXY
 
 log = logging.getLogger("cosmic_watch")
 CACHE_DIR = DATA / "explain"
@@ -181,7 +181,7 @@ def facts_for(con, det_id):
     filt = (d["filter"] or "").split(";")[-1].strip().upper()
     field_kind, field_text = _field(d["target"])
     probs = json.loads(d["cnn_probs"]) if d["cnn_probs"] else None
-    top = sorted(((CLASSES[i], p) for i, p in enumerate(probs)), key=lambda t: -t[1])[:3] if probs else []
+    top = sorted(((CLASSES_ALL[i], p) for i, p in enumerate(probs)), key=lambda t: -t[1])[:3] if probs else []
     return {
         "image": {"id": d["image_id"], "telescope": "JWST" if d["source"] == "jwst" else "Hubble", "instrument": d["instrument"],
                   "filter": d["filter"], "wavelength": wl, "band": band, "band_note": BAND_NOTE.get(band),
@@ -236,6 +236,10 @@ def verdict(f):
     if gas >= 3:
         return {"kind": "nebula", "label": "Probably glowing gas, not a galaxy", "confidence": "high" if gas >= 5 else "medium",
                 "why": why + (["Our CNN still calls it a galaxy shape because galaxies are all it knows."] if cnn else [])}
+    if cnn and cnn["label"] == NOT_GALAXY:
+        return {"kind": "artifact", "label": "Probably not a galaxy", "confidence": "high" if cnn["conf"] >= 0.8 else "medium",
+                "why": why + [f"Our CNN, after learning from your labels and from stars and nebula patches, says it is not a galaxy "
+                              f"({cnn['conf'] * 100:.0f}%): most likely a star, a patch of gas or an artifact."]}
     if cnn and cnn["conf"] is not None and cnn["conf"] < 0.45:
         return {"kind": CLASS_GROUP.get(cnn["label"], "galaxy"), "label": f"Probably a galaxy; shape uncertain", "confidence": "low",
                 "why": why + [f"The CNN is unsure: its best guess, {cnn['label']}, has only {cnn['conf'] * 100:.0f}%."]}

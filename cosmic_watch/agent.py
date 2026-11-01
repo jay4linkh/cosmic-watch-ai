@@ -32,6 +32,7 @@ KIND_NAMES = {
     "gcn_frb": "a fast radio burst",
     "neo_close": "an asteroid passing inside the Moon's orbit",
     "mars_feature": "a science find on Mars",
+    "teach_request": "a request to teach the galaxy CNN",
 }
 OPENERS = ["This looks interesting.", "Something caught my eye.", "Have a look at this.", "I found an odd one."]
 

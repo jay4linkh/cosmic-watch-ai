@@ -15,6 +15,7 @@ import { createMars } from './views/mars.js';
 import { createNeo } from './views/neo.js';
 import { createInspector } from './inspect.js';
 import { createDeepZoom } from './deepzoom.js';
+import { createTeacher } from './teach.js';
 
 const $ = (s) => document.querySelector(s);
 const SOURCE_COLOR = { lsst: '#67e8f9', ztf: '#5eead4', jwst: '#fcd34d', hst: '#d8b4fe', sdo: '#fdba74', alerts: '#a78bfa', mast: '#60a5fa' };
@@ -75,6 +76,8 @@ const ctx = {
   openDeepZoom: (spec) => dz.open(spec),
   movie: (title, frames, caption) => showMovie(title, frames, caption),
   currentView: () => current?.name,
+  teach: () => teacher.open(),
+  toast: (h, c) => toast(h, c),
 };
 
 const views = {
@@ -95,6 +98,9 @@ function hideLabels(group) {
 const inspector = createInspector(ctx);
 const INSPECT_HOME = { pos: [-2, 7, 44], target: [6, 0, 0] };
 const INSPECT_FAR = 46, INSPECT_NEAR = 13;
+
+// ---------- active learning: answer what the CNN is unsure about ----------
+const teacher = createTeacher({ toast: (h, c) => toast(h, c), onLabel: (n) => { labelCount = n ?? labelCount; } });
 
 // ---------- deep zoom (tiled real pixels) ----------
 const dz = createDeepZoom({
@@ -622,6 +628,7 @@ async function agentLook() {
     else if (ref.view === 'bh') { await switchView('bh'); await views.bh.openOid(ref.survey, ref.oid); }
     else if (ref.view === 'sun' && ref.lasco) { await switchView('sun'); views.sun.showLasco(ref.lasco); }
     else if (ref.view === 'sun') { await switchView('sun'); if (ref.channel) await views.sun.focusOn(ref.channel, ref.x, ref.y); renderItems(); renderInfo(); }
+    else if (ref.teach) { await switchView('deep'); teacher.open(); }
     else if (ref.view === 'mars') { await switchView('mars'); await views.mars.openImage(ref.image_id); }
     else if (ref.view === 'neo') { await switchView('neo'); views.neo.focus(ref.des); }
   } catch (e) { toast(`Couldn't open it: ${e.message}`, '#fb7185'); }
@@ -657,6 +664,7 @@ addEventListener('keydown', async (e) => {
   else if (e.key === 'ArrowLeft' && current?.selectItem) { await current.selectItem(current.itemIndex - 1); renderItems(); }
   else if ((e.key === 'z' || e.key === 'Z') && state.inspecting && !dz.isOpen) openDeep();
   else if ((e.key === 'o' || e.key === 'O') && dz.isOpen) dz.toggleOverlay();
+  else if ((e.key === 't' || e.key === 'T') && !dz.isOpen && !state.inspecting) teacher.open();
   else if ((e.key === 'e' || e.key === 'E') && dz.isOpen) dz.cycleAI();
   else if (e.key === 'Escape') { if (!$('#lightbox').hidden) closeMovie(); else if (dz.isOpen) dz.close(); else if (state.inspecting) closeInspect(); else $('#detail').classList.remove('open'); }
 });

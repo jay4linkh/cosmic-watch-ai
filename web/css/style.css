@@ -421,3 +421,22 @@ body.inspecting #feed, body.deepzoom #feed { display: none; }
   #feed { left: 16px; right: 16px; width: auto; top: auto; bottom: 70px; max-height: 40vh; }
   body.has-feed #info { display: none; }
 }
+
+/* ---------- teach me (active learning) ---------- */
+#teach { position: fixed; inset: 0; z-index: 34; background: rgba(0,0,0,.65); display: flex; align-items: center; justify-content: center; }
+#teach[hidden] { display: none; }
+.teach-card { position: relative; width: min(760px, calc(100vw - 32px)); padding: 18px; }
+.teach-close { position: absolute; right: 10px; top: 10px; }
+.teach-count { margin-left: auto; color: var(--ink-3); letter-spacing: 0; }
+.teach-grid { display: grid; grid-template-columns: 300px 1fr; gap: 16px; align-items: start; }
+.teach-img img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 12px; border: 1px solid var(--line-2); background: #000; display: block; }
+.teach-img span { font-family: var(--mono); font-size: 10px; color: var(--ink-3); }
+.teach-q { font-size: 14px; color: var(--ink); line-height: 1.45; margin: 0 0 8px; }
+.teach-answers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 12px; }
+.teach-answers button { padding: 10px 6px; border-radius: 10px; border: 1px solid var(--line-2); background: rgba(148,182,255,.06); color: var(--ink); cursor: pointer; font: inherit; font-size: 13px; }
+.teach-answers button:hover, .teach-answers button.hand-hover { border-color: var(--cyan); background: rgba(103,232,249,.12); }
+.teach-answers button.ghost { color: var(--ink-3); }
+.teach-answers kbd { margin-right: 6px; }
+.teach-btn b { color: #c4b5fd; }
+.feed-item[disabled] { opacity: .45; cursor: default; }
+@media (max-width: 720px) { .teach-grid { grid-template-columns: 1fr; } .teach-answers { grid-template-columns: repeat(2, 1fr); } }

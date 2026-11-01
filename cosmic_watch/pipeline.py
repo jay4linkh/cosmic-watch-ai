@@ -157,8 +157,16 @@ def run_mars(con) -> int:
     return n
 
 
+def run_learn(con) -> int:
+    """Active learning: start a background training round when there is enough new to learn from."""
+    from .ml import active
+    msg = active.maybe_retrain(con)
+    log.info("[learn] %s", msg)
+    return int(msg.startswith("training started"))
+
+
 SOURCES = {"sdo": run_sdo, "mast": run_mast, "alerts": run_alerts, "spacewx": run_spacewx, "gw": run_gw,
-           "gcn": run_gcn, "mars": run_mars, "neo": run_neo}
+           "gcn": run_gcn, "mars": run_mars, "neo": run_neo, "learn": run_learn}
 
 
 RETRY_AFTER_ERROR_S = 120

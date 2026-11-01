@@ -17,14 +17,15 @@ import cv2
 import numpy as np
 
 from .. import db
-from ..config import ROOT
+from ..config import DATA, ROOT
 from .classes import CLASSES, COARSE
 from .cutouts import MEAN, STD, SIZE, cutout, normalize
 
 log = logging.getLogger("cosmic_watch")
 
 MODEL_DIR = ROOT / "models"
-VERSIONS = ["galaxy_cnn_v2", "galaxy_cnn_v1"]   # newest first
+LIVE_DIR = DATA / "models"                      # the actively learned model (changes over time, not in git)
+VERSIONS = ["galaxy_cnn_live", "galaxy_cnn_v2", "galaxy_cnn_v1"]   # newest first
 MAX_PER_IMAGE = 120        # brightest galaxies per image
 MIN_A_PX = 1.5             # skip sources too small to have a shape (full-res px)
 
@@ -32,12 +33,33 @@ _session = None
 _card = None
 
 
+def _path(v):
+    return (LIVE_DIR if v == "galaxy_cnn_live" else MODEL_DIR) / f"{v}.onnx"
+
+
 def _pick() -> str | None:
     want = os.environ.get("COSMIC_CNN")
     for v in ([want] if want else VERSIONS):
-        if (MODEL_DIR / f"{v}.onnx").exists():
+        if _path(v).exists() and _path(v).with_suffix(".json").exists():
             return v
     return None
+
+
+_loaded = (None, 0.0)
+
+
+def reload():
+    """Drop the cached model so the next call picks up a newly promoted one."""
+    global _session, _card, _loaded
+    _session, _card, _loaded = None, None, (None, 0.0)
+
+
+def _check_fresh():
+    """Long-running processes (pipeline, server) switch to a new model as soon as active learning promotes one."""
+    v = _pick()
+    key = (v, _path(v).stat().st_mtime if v else 0.0)
+    if key != _loaded and _loaded != (None, 0.0):
+        reload()
 
 
 def available() -> bool:
@@ -50,15 +72,18 @@ def available() -> bool:
 
 def card() -> dict:
     """The active model's card, with defaults for v1 cards that predate the size fields."""
-    global _card
+    global _card, _loaded
+    _check_fresh()
     if _card is None:
         v = _pick()
-        c = json.loads((MODEL_DIR / f"{v}.json").read_text(encoding="utf-8")) if v else {}
+        c = json.loads(_path(v).with_suffix(".json").read_text(encoding="utf-8")) if v else {}
+        _loaded = (v, _path(v).stat().st_mtime if v else 0.0)
         c.setdefault("version", v)
         c.setdefault("size", SIZE)
         c.setdefault("channels", 3)
         c.setdefault("tta_rotations", 1)
         c.setdefault("normalize", {"mean": MEAN, "std": STD})
+        c.setdefault("classes", CLASSES)
         _card = c
     return _card
 
@@ -73,13 +98,14 @@ def session():
         import onnxruntime as ort
         opts = ort.SessionOptions()
         opts.intra_op_num_threads = 2
-        _session = ort.InferenceSession(str(MODEL_DIR / f"{version()}.onnx"), opts, providers=["CPUExecutionProvider"])
+        _session = ort.InferenceSession(str(_path(_pick())), opts, providers=["CPUExecutionProvider"])   # file key, not display version
     return _session
 
 
 def predict(cutouts_u8: np.ndarray) -> np.ndarray:
-    """(N, size, size) uint8 -> (N, 10) probabilities, averaged over 90-degree rotations if the card says so."""
-    c, s = card(), session()
+    """(N, size, size) uint8 -> (N, n_classes) probabilities, averaged over 90-degree rotations if the card says so."""
+    c = card()
+    s = session()
     norm = c["normalize"]
     out = []
     for i in range(0, len(cutouts_u8), 32):
@@ -90,14 +116,14 @@ def predict(cutouts_u8: np.ndarray) -> np.ndarray:
             e = np.exp(logits - logits.max(1, keepdims=True))
             acc = acc + e / e.sum(1, keepdims=True)
         out.append(acc / c["tta_rotations"])
-    return np.concatenate(out) if out else np.zeros((0, len(CLASSES)), np.float32)
+    return np.concatenate(out) if out else np.zeros((0, len(c["classes"])), np.float32)
 
 
 def classify_cutouts(gray: np.ndarray, sources) -> np.ndarray:
     """sources: iterable of (x, y, a) in gray's pixels -> (N, 10) probabilities."""
     size = card()["size"]
     cuts = [cutout(gray, x, y, a, size=size) for x, y, a in sources]
-    return predict(np.stack(cuts)) if cuts else np.zeros((0, len(CLASSES)), np.float32)
+    return predict(np.stack(cuts)) if cuts else np.zeros((0, len(card()["classes"])), np.float32)
 
 
 def coarse(probs: np.ndarray) -> dict:
@@ -122,9 +148,10 @@ def classify_image(con, image_id: int) -> int:
         return 0
     probs = classify_cutouts(gray, [(d["x"] / scale, d["y"] / scale, d["a"] / scale) for d in dets])
     rows = []
+    names = card()["classes"]
     for d, pr in zip(dets, probs):
         k = int(pr.argmax())
-        rows.append((CLASSES[k], float(pr[k]), json.dumps([round(float(v), 4) for v in pr]), d["id"]))
+        rows.append((names[k], float(pr[k]), json.dumps([round(float(v), 4) for v in pr]), d["id"]))
     con.executemany("UPDATE detections SET cnn_label=?, cnn_conf=?, cnn_probs=? WHERE id=?", rows)
     con.commit()
     return len(rows)

@@ -7,11 +7,12 @@
 import { sparkline, esc } from './fx.js';
 
 const OSD_URL = 'https://cdnjs.cloudflare.com/ajax/libs/openseadragon/4.1.0/openseadragon.min.js';
-const COARSE_COLOR = { merger: '#f472b6', elliptical: '#fbbf24', spiral: '#67e8f9', 'edge-on': '#a78bfa' };
+const COARSE_COLOR = { merger: '#f472b6', elliptical: '#fbbf24', spiral: '#67e8f9', 'edge-on': '#a78bfa', 'not a galaxy': '#64748b' };
 const CNN_GROUP = {
   Disturbed: 'merger', Merging: 'merger', 'Round smooth': 'elliptical', 'In-between round smooth': 'elliptical',
   'Cigar-shaped smooth': 'elliptical', 'Barred spiral': 'spiral', 'Unbarred tight spiral': 'spiral',
   'Unbarred loose spiral': 'spiral', 'Edge-on without bulge': 'edge-on', 'Edge-on with bulge': 'edge-on',
+  'Not a galaxy': 'not a galaxy',
 };
 const ALERT_COLOR = { TDE: '#f472b6', AGN: '#a78bfa', QSO: '#38bdf8', Blazar: '#fbbf24', SN: '#4ade80', bogus: '#6b7a93' };
 const MAX_ELLIPSES = 400;

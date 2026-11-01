@@ -1,6 +1,6 @@
 // Deep field: a newly public JWST/Hubble image that pulls apart into a 3D cloud of AI detections.
 import * as THREE from 'three';
-import { api, loadTexture, glowPointsMaterial, pointGeometry, label, fmt, timeAgo, disposeTree, lerp } from '../fx.js';
+import { api, loadTexture, glowPointsMaterial, pointGeometry, label, fmt, timeAgo, disposeTree, lerp, esc } from '../fx.js';
 
 const WIDTH = 44;      // world units across the image
 const LABEL_COLORS = {
@@ -15,7 +15,7 @@ const CNN_SHAPE = {
   'Disturbed': 'merger', 'Merging': 'merger',
   'Round smooth': 'elliptical', 'In-between round smooth': 'elliptical', 'Cigar-shaped smooth': 'elliptical',
   'Barred spiral': 'spiral', 'Unbarred tight spiral': 'spiral', 'Unbarred loose spiral': 'spiral',
-  'Edge-on without bulge': 'edge-on', 'Edge-on with bulge': 'edge-on',
+  'Edge-on without bulge': 'edge-on', 'Edge-on with bulge': 'edge-on', 'Not a galaxy': 'star',
 };
 
 export function createDeep(ctx) {
@@ -23,6 +23,7 @@ export function createDeep(ctx) {
   let list = [];
   let index = 0;
   let current = null;       // {plane, points, callouts, base: Float32Array, depth, meta}
+  let learn = null;         // active-learning status
   let loading = null;
 
   async function loadList() {
@@ -172,7 +173,40 @@ export function createDeep(ctx) {
     home: { pos: [0, 0, 70], target: [0, 0, -10] },
     autoRotate: false,
     explodeLabel: 'Exploded view',
-    async load() { await loadList(); await show(index); },
+    async load() { await Promise.all([loadList().then(() => show(index)), this.refreshPanel()]); },
+    async refreshPanel() { try { learn = await api('/api/learn/status'); } catch { /* keep */ } },
+    panel() {
+      if (!learn) return null;
+      const rounds = (learn.rounds || []).slice().reverse();
+      const tr = learn.training || {};
+      const pct = (v) => (v == null ? '—' : `${(v * 100).toFixed(1)}%`);
+      return `
+        <div class="feed-k">ACTIVE LEARNING · GALAXY CNN</div>
+        <p class="feed-dim small">The CNN asks about the objects it is least sure of. Your answers, plus stars and nebula patches it finds itself,
+          retrain it on this laptop's GPU; a new model replaces the old one only if it scores better on held-out data.</p>
+        <div class="sw-row">
+          <div class="sw-big"><b>${esc(learn.model || '—')}</b><span>model in use${learn.classes === 11 ? ' · 11 classes' : ''}</span></div>
+          <div class="sw-big"><b>${learn.user_labels}</b><span>labels from you</span></div>
+          <div class="sw-big ${tr.running ? 'warn' : ''}"><b>${tr.running ? 'training' : `${learn.new_since_last_round}/${learn.threshold}`}</b><span>${tr.running ? `since ${(tr.started || '').slice(11, 16)}` : 'new labels → retrain'}</span></div>
+        </div>
+        <div class="lasco-row" style="grid-template-columns:2fr 1fr">
+          <button class="feed-item teach-btn" data-act="teach"><span class="chip" style="--c:#a78bfa">✋ 1-7</span><b>Teach me</b><small>answer what I'm unsure about</small></button>
+          <button class="feed-item" data-act="retrain" ${tr.running || !learn.gpu ? 'disabled' : ''}><b>Retrain now</b><small>${learn.gpu ? 'on the GPU' : 'needs a GPU'}</small></button>
+        </div>
+        <div class="feed-sub">Learning rounds</div>
+        ${rounds.length ? `<table class="feed-table"><tr><th>#</th><th>Result</th><th>Galaxy10</th><th>Not-galaxy</th><th>Your labels</th></tr>
+          ${rounds.map((r) => `<tr title="${esc((r.reasons || []).join('; '))}"><td>${r.round}</td>
+            <td>${r.promoted ? `<b style="color:var(--green)">${esc(r.version)}</b>` : '<span class="warn">kept old</span>'}</td>
+            <td>${pct(r.champion_metrics?.g10_val_acc)} → ${pct(r.challenger_metrics?.g10_val_acc)}</td>
+            <td>${pct(r.challenger_metrics?.not_galaxy_recall)}</td><td>${r.n_user_labels}</td></tr>`).join('')}</table>
+          <p class="feed-dim small">Galaxy10 = accuracy on held-out Galaxy Zoo galaxies (must not drop). Not-galaxy = held-out stars and gas correctly rejected.</p>`
+          : '<p class="feed-dim">No learning round yet: the first one starts automatically.</p>'}`;
+    },
+    onPanel(act) {
+      if (act === 'teach') ctx.teach?.();
+      if (act === 'retrain') fetch('/api/learn/retrain', { method: 'POST' }).then((r) => r.json())
+        .then((j) => { ctx.toast?.(j.message, '#a78bfa'); return this.refreshPanel(); }).then(() => ctx.onInfoChange());
+    },
     async enter() { if (!list.length) await this.load(); },
     update(dt, t, e) {
       if (Math.abs(e - lastE) > 1e-4 || current?._fresh !== false) { applyExplode(e); lastE = e; if (current) current._fresh = false; }
