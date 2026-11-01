@@ -31,7 +31,7 @@ THUMB_DIR = DATA / "thumbs"
 THUMB_VERSION = 2   # bump when thumbnail processing changes, so browsers refetch
 SOURCES = {"alerts": "Rubin + ZTF alerts", "sdo": "SDO · Sun", "mast": "JWST + Hubble", "spacewx": "Space weather",
            "gw": "LIGO · gravitational waves", "gcn": "GCN · bursts & neutrinos", "mars": "Mars rovers", "neo": "Near-Earth asteroids",
-           "learn": "Active learning"}
+           "learn": "Active learning", "xsurvey": "Cross-survey intelligence"}
 BH_CLASSES = ("TDE", "AGN", "QSO", "Blazar")
 
 
@@ -379,6 +379,108 @@ def learn_retrain():
         return {"message": active.maybe_retrain(con, force=True)}
     finally:
         con.close()
+
+
+# ---------- cross-survey intelligence (Phase 1) ----------
+
+def _xs(fn):
+    con = db.connect()
+    try:
+        return fn(con)
+    finally:
+        con.close()
+
+
+@app.get("/api/xsurvey/stats")
+def xsurvey_stats():
+    """How many objects have archive evidence, verdict counts, our labels vs the archives, matcher validation."""
+    from .xsurvey import worker
+    return _xs(worker.stats)
+
+
+@app.post("/api/xsurvey/run")
+def xsurvey_run():
+    from .xsurvey import worker
+    return {"started": worker.start(), "state": worker.STATE}
+
+
+@app.get("/api/xsurvey/object")
+def xsurvey_object(ref: str):
+    from .xsurvey import engine
+    rep = _xs(lambda con: engine.load(con, ref))
+    if not rep:
+        raise HTTPException(404, "no cross-survey report yet")
+    return rep
+
+
+def _xs_report(make_target, ref, run):
+    from .xsurvey import engine
+
+    def go(con):
+        rep = engine.load(con, ref)
+        if rep or not run:
+            return rep
+        t = make_target(con)
+        return engine.analyze(t, con) if t else None
+    rep = _xs(go)
+    if not rep:
+        raise HTTPException(404, "no sky position for this object" if run else "no cross-survey report yet")
+    return rep
+
+
+@app.get("/api/xsurvey/alert/{survey}/{oid}")
+def xsurvey_alert(survey: str, oid: str, run: bool = True):
+    """Evidence report for one alert (computed on first request; catalogues are cached afterwards)."""
+    from .xsurvey import engine
+    return _xs_report(lambda con: engine.alert_target(con, survey, oid), f"alert:{survey}:{oid}", run)
+
+
+@app.get("/api/xsurvey/detection/{det_id}")
+def xsurvey_detection(det_id: int, run: bool = True):
+    """Evidence report for one JWST/Hubble detection (its sky position comes from the science mosaic's WCS)."""
+    from .xsurvey import engine, wcs
+
+    def target(con):
+        d = con.execute("SELECT image_id, ra FROM detections WHERE id=?", (det_id,)).fetchone()
+        if d and d["ra"] is None:
+            wcs.locate_image(con, d["image_id"])
+        return engine.detection_target(con, det_id)
+    img = _xs(lambda con: con.execute("SELECT image_id FROM detections WHERE id=?", (det_id,)).fetchone())
+    if not img:
+        raise HTTPException(404)
+    return _xs_report(target, f"detection:{img['image_id']}:{det_id}", run)
+
+
+@app.get("/api/xsurvey/image/{image_id}")
+def xsurvey_image(image_id: int):
+    """Per-detection archive verdicts for one image (for the deep-zoom overlay) + the field summary."""
+    def go(con):
+        _, summary = db.get_feed(con, f"xsurvey_image:{image_id}")
+        objs = con.execute("""SELECT ref, verdict, verdict_conf, json_extract(report, '$.cnn_agrees') AS agrees
+                              FROM astronomical_objects WHERE ref LIKE ?""", (f"detection:{image_id}:%",)).fetchall()
+        return {"summary": summary, "detections": {o["ref"].split(":")[2]: {"verdict": o["verdict"], "confidence": o["verdict_conf"],
+                                                                            "agrees": o["agrees"]} for o in objs}}
+    return _xs(go)
+
+
+@app.get("/api/xsurvey/gcn/{event}")
+def xsurvey_gcn(event: str, run: bool = True):
+    from .xsurvey import engine
+
+    def target(con):
+        _, g = db.get_feed(con, "gcn")
+        ev = next((e for e in (g or {}).get("events", []) if e["event"] == event), None)
+        return engine.gcn_target(ev) if ev else None
+    return _xs_report(target, f"gcn:{event}", run)
+
+
+@app.get("/api/xsurvey/position")
+def xsurvey_position(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90),
+                     err: float = Query(1.0, gt=0, le=3600), mag: float | None = None):
+    """Any sky position: what do the archives know here? (not stored)"""
+    from .xsurvey import engine
+    t = {"kind": "position", "ref": f"position:{ra:.5f}:{dec:.5f}", "ra": ra, "dec": dec, "err": err, "epoch": None, "mag_now": mag}
+    return _xs(lambda con: engine.analyze(t, con, persist=False))
 
 
 @app.get("/api/explain/detection/{det_id}")

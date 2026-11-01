@@ -434,9 +434,38 @@ def run_learn(con) -> int:
         "ref": {"view": "deep", "teach": True}})
 
 
+XS_INTERESTING = {
+    "new_hostless_transient": ("Something new where the archives saw nothing",
+                               ["a genuinely new transient with no visible host", "a host galaxy below the catalogue limits",
+                                "an unknown fast-moving asteroid"]),
+    "nuclear_transient": ("A flare at the heart of a galaxy",
+                          ["a tidal disruption event", "an AGN waking up", "a supernova in the galaxy core"]),
+    "supernova_candidate": ("A supernova candidate with a host galaxy",
+                            ["a supernova", "a nova or variable star projected on the galaxy", "a lensed background event"]),
+}
+
+
+def run_xsurvey(con) -> int:
+    n = 0
+    for r in con.execute("""SELECT ref, verdict, verdict_conf, report FROM astronomical_objects
+                            WHERE kind IN ('alert','gcn') AND verdict_conf >= 0.6 ORDER BY updated_at DESC LIMIT 200""").fetchall():
+        if r["verdict"] not in XS_INTERESTING:
+            continue
+        rep = json.loads(r["report"])
+        if "broker_bogus" in rep.get("flags", []):
+            continue
+        title, hyp = XS_INTERESTING[r["verdict"]]
+        _, survey, oid = (r["ref"].split(":", 2) + ["", ""])[:3]
+        n += record(con, {
+            "key": f"xs:{r['ref']}", "source": "xsurvey", "kind": f"xs_{r['verdict']}", "score": round(float(r["verdict_conf"]), 3),
+            "title": f"{title}: {oid}", "reason": rep["summary"][:400], "hypotheses": hyp,
+            "ref": {"view": "bh", "survey": survey, "oid": oid} if r["ref"].startswith("alert:") else {"view": "bh", "gcn": oid}})
+    return n
+
+
 def run_for(con, source: str) -> int:
     """Called by the pipeline after each source run."""
-    extra = {"learn": run_learn, "spacewx": run_spacewx, "gw": run_gw, "gcn": run_gcn, "neo": run_neo, "mars": run_mars}
+    extra = {"xsurvey": run_xsurvey, "learn": run_learn, "spacewx": run_spacewx, "gw": run_gw, "gcn": run_gcn, "neo": run_neo, "mars": run_mars}
     if source in extra:
         return extra[source](con)
     if source == "sdo":

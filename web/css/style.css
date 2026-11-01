@@ -440,3 +440,30 @@ body.inspecting #feed, body.deepzoom #feed { display: none; }
 .teach-btn b { color: #c4b5fd; }
 .feed-item[disabled] { opacity: .45; cursor: default; }
 @media (max-width: 720px) { .teach-grid { grid-template-columns: 1fr; } .teach-answers { grid-template-columns: repeat(2, 1fr); } }
+
+/* cross-survey evidence */
+.dz-xs { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.08); }
+.xs-verdict { display: grid; grid-template-columns: 1fr 70px auto; align-items: center; gap: 8px; margin: 4px 0 6px; }
+.xs-verdict b { font-size: 14px; }
+.xs-verdict em { font-style: normal; font-family: var(--mono); font-size: 11px; color: #9aa7b8; }
+.xs-bar { height: 5px; border-radius: 3px; background: rgba(255,255,255,0.1); overflow: hidden; }
+.xs-bar i { display: block; height: 100%; background: linear-gradient(90deg, #67e8f9, #a78bfa); }
+.xs-covrow { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }
+.xs-cov { font-family: var(--mono); font-size: 10px; padding: 2px 6px; border-radius: 9px; border: 1px solid rgba(255,255,255,0.15); color: #9aa7b8; }
+.xs-cov.covered { border-color: rgba(74,222,128,0.6); color: #4ade80; }
+.xs-cov.failed { border-color: rgba(248,113,113,0.6); color: #f87171; }
+.xs-cov.not_covered { text-decoration: line-through; opacity: 0.6; }
+.xs-ev { list-style: none; padding: 0; margin: 6px 0; font-size: 12px; line-height: 1.45; }
+.xs-ev li { margin: 5px 0; display: grid; grid-template-columns: 50px 1fr; gap: 6px; }
+.xs-tag { font-style: normal; font-family: var(--mono); font-size: 9px; letter-spacing: 0.06em; text-align: center; padding: 2px 0;
+  border-radius: 4px; height: fit-content; background: rgba(255,255,255,0.08); color: #cbd5e1; }
+.xs-tag.catalog_fact { background: rgba(103,232,249,0.15); color: #67e8f9; }
+.xs-tag.measurement { background: rgba(74,222,128,0.15); color: #4ade80; }
+.xs-tag.model_prediction { background: rgba(167,139,250,0.18); color: #c4b5fd; }
+.xs-tag.inference { background: rgba(251,191,36,0.15); color: #fbbf24; }
+.xs-tag.missing { background: rgba(248,113,113,0.15); color: #f87171; }
+.xs-flags span { display: inline-block; font-family: var(--mono); font-size: 10px; margin: 0 4px 4px 0; padding: 2px 6px; border-radius: 4px;
+  background: rgba(251,191,36,0.12); color: #fbbf24; }
+.xs-hist { display: grid; grid-template-columns: 44px auto 1fr; gap: 2px 8px; font-size: 11px; }
+.xs-hist span { font-family: var(--mono); color: #9aa7b8; }
+.xs-hist em { font-style: normal; color: #9aa7b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

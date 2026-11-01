@@ -31,6 +31,49 @@ function loadOSD() {
 
 const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
 const pct = (p) => `${Math.round(p * 100)}%`;
+
+// ---------- cross-survey evidence (Phase 1) ----------
+const XS_LABEL = {
+  variable_star: 'Variable star in the Milky Way', agn_variability: 'Known quasar / AGN flickering', nuclear_transient: 'Flare at a galaxy core',
+  supernova_candidate: 'Supernova candidate', new_hostless_transient: 'New, hostless transient', new_transient_unconstrained: 'New (archives too shallow)',
+  known_source_variable: 'Known source, type unknown', known_asteroid: 'Known asteroid', insufficient_data: 'Archives inconclusive',
+  coarse_localisation: 'Position too uncertain', catalog_star: 'Archives: a star', catalog_galaxy: 'Archives: a galaxy',
+  catalog_qso: 'Archives: a quasar', catalog_point_source: 'Archives: point source', archives_too_shallow: 'Too faint for the archives',
+};
+const XS_CLAIM = { catalog_fact: ['CAT', 'a catalogue says so'], measurement: ['MEAS', 'our own measurement'],
+  model_prediction: ['MODEL', 'a classifier output'], inference: ['RULE', 'a rule combining the facts'], missing: ['MISSING', 'a source did not answer'] };
+const XS_SURVEY = { gaia_dr3: 'Gaia', ps1_dr2: 'Pan-STARRS', sdss_dr18: 'SDSS', ls_dr10: 'Legacy' };
+
+function xsEvidence(rep) {
+  if (!rep?.verdict) return '<p class="dz-hint">No archive evidence for this object.</p>';
+  const conf = Math.round(rep.confidence * 100);
+  const cov = Object.entries(rep.coverage || {}).map(([k, v]) => `<span class="xs-cov ${v}" title="${String(v).replace('_', ' ')}">${XS_SURVEY[k] || k}</span>`).join('');
+  const ev = rep.evidence.filter((e) => !(e.claim_type === 'inference' && e.data?.verdict)).map((e) => {
+    const [tag, tip] = XS_CLAIM[e.claim_type] || ['?', ''];
+    return `<li><i class="xs-tag ${e.claim_type}" title="${tip}">${tag}</i><span>${esc(e.statement)}</span></li>`;
+  }).join('');
+  const hist = (rep.history || []).filter((h) => h.mag != null).slice(0, 8).map((h) =>
+    `<span>${h.epoch ? h.epoch.toFixed(1) : '—'}</span><b>${h.upper_limit ? '&gt; ' : ''}${h.mag.toFixed(2)} ${esc(h.band || '')}</b><em>${esc((h.source || '').split(':')[0])}</em>`).join('');
+  const alt = (rep.alternatives || []).slice(0, 2).map((a) => `${XS_LABEL[a.verdict] || a.verdict} (${Math.round(a.confidence * 100)}%)`).join(' · ');
+  return `<div class="dz-card-k">ARCHIVE EVIDENCE · CROSS-SURVEY</div>
+    <div class="xs-verdict"><b>${XS_LABEL[rep.verdict] || rep.verdict}</b><span class="xs-bar"><i style="width:${conf}%"></i></span><em>${conf}%</em></div>
+    <p>${esc(rep.summary)}</p>
+    ${rep.flags?.length ? `<p class="xs-flags">${rep.flags.map((f) => `<span>${esc(f.replace(':', ' · '))}</span>`).join('')}</p>` : ''}
+    <div class="xs-covrow">${cov}</div>
+    <ul class="xs-ev">${ev}</ul>
+    ${hist ? `<div class="feed-sub">Brightness through the years</div><div class="xs-hist">${hist}</div>` : ''}
+    ${alt ? `<p class="dz-hint">Also possible: ${alt}.</p>` : ''}
+    <p class="dz-hint">Each line is tagged: CAT catalogue fact · MEAS our measurement · MODEL classifier · RULE inference · MISSING service down
+    (absent, not negative). Matches are Bayesian (separation vs local source density, Gaia proper motions applied). ${rep.engine} · ${rep.elapsed_s}s.</p>`;
+}
+
+async function xsFill(box, url, isCurrent) {
+  if (!box) return;
+  box.innerHTML = '<p class="dz-hint">Asking Gaia, Pan-STARRS, SDSS, Legacy Surveys, SIMBAD and NED (first time can take a minute)…</p>';
+  const rep = await fetch(url).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  if (!isCurrent()) return;
+  box.innerHTML = rep ? xsEvidence(rep) : '<p class="dz-hint">No sky position for this object yet (no science WCS), so no archive evidence.</p>';
+}
 function fmtAngle(arcsec) {
   if (arcsec >= 60) return `${(arcsec / 60).toFixed(arcsec >= 600 ? 0 : 1)}′`;
   return `${arcsec.toFixed(arcsec >= 10 ? 0 : 1)}″`;
@@ -253,7 +296,9 @@ export function createDeepZoom({ onClose, toast }) {
       <div class="dz-facts">${facts.map(([k, val]) => `<span>${k}</span><b>${val}</b>`).join('')}</div>
       ${im.band_note ? `<p class="dz-hint">${im.wavelength}: ${im.band_note}.${im.emission_line ? ` This filter isolates ${im.emission_line}.` : ''}</p>` : ''}
       ${im.field ? `<p class="dz-hint">Field: ${im.field}.</p>` : ''}
-      ${!x.claude_available ? '<p class="dz-hint">Built-in knowledge. Set ANTHROPIC_API_KEY on the server and Claude writes a fuller explanation from these facts.</p>' : ''}`);
+      ${!x.claude_available ? '<p class="dz-hint">Built-in knowledge. Set ANTHROPIC_API_KEY on the server and Claude writes a fuller explanation from these facts.</p>' : ''}
+      <div class="dz-xs"></div>`);
+    xsFill($('.dz-xs'), `/api/xsurvey/detection/${r[9]}`, () => my === token);
   }
 
   // brightness over time from ALeRCE, and what SIMBAD / Gaia / NED know about the spot
@@ -302,8 +347,10 @@ export function createDeepZoom({ onClose, toast }) {
         <p class="dz-hint">Background: the same patch of sky from the <b>${info.layer.toUpperCase()}</b> survey, taken years before the burst.
         Positions from gamma-ray satellites can be uncertain by arcminutes; X-ray and optical afterglows pin it to arcseconds.</p>
         <div class="dz-host">Looking for a host galaxy…</div>
+        <div class="dz-xs"></div>
         <div class="feed-sub">Reports (${g.n})</div>
         <ol class="gcn-list">${g.circulars.slice().reverse().slice(0, 8).map((c) => `<li><a href="https://gcn.nasa.gov/circulars/${c.id}" target="_blank" rel="noopener">${esc(c.subject)}</a></li>`).join('')}</ol>`);
+      xsFill($('.dz-xs'), `/api/xsurvey/gcn/${encodeURIComponent(g.event)}`, () => my === token);
     }
     for (const m of info.alerts) {
       const main = m.oid === spec.oid;
@@ -322,8 +369,10 @@ export function createDeepZoom({ onClose, toast }) {
       from the <b>${info.layer.toUpperCase()}</b> survey (taken years earlier, before this event).</p>
       <div class="dz-host">Looking for the host galaxy…</div>
       <div class="dz-ctx"><p class="dz-hint">Loading the light curve and asking SIMBAD, Gaia and NED (first time can take a minute)…</p></div>
+      <div class="dz-xs"></div>
       ${others > 0 ? `<p class="dz-hint">${others} other alert${others > 1 ? 's' : ''} we know of ${others > 1 ? 'are' : 'is'} in this field.</p>` : ''}`);
     alertContext(my);
+    if (!spec.gcn) xsFill($('.dz-xs'), `/api/xsurvey/alert/${spec.survey}/${spec.oid}`, () => my === token);
     const h = await fetch(`/api/dz/host?ra=${spec.ra}&dec=${spec.dec}`).then((r) => r.json()).catch(() => null);
     if (my !== token) return;
     const box = $('.dz-host');

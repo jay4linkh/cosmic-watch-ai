@@ -85,6 +85,68 @@ CREATE TABLE IF NOT EXISTS feeds (       -- latest JSON snapshot of each live fe
     fetched_at TEXT NOT NULL,
     data TEXT NOT NULL
 );
+-- ---------- cross-survey intelligence (Phase 1) ----------
+CREATE TABLE IF NOT EXISTS astronomical_objects (    -- one row per thing in the sky we investigated
+    id INTEGER PRIMARY KEY,
+    kind TEXT NOT NULL,              -- alert | detection | gcn | position
+    ref TEXT NOT NULL UNIQUE,        -- e.g. "alert:lsst:3137...", "detection:7:1234", "gcn:GRB 261029A"
+    ra REAL, dec REAL,
+    pos_err_arcsec REAL,
+    epoch REAL,                      -- decimal year of the reference position
+    verdict TEXT,                    -- headline verdict (new_transient, galactic_star, known_object, ...)
+    verdict_conf REAL,
+    report TEXT,                     -- JSON evidence report
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS cross_survey_matches (
+    id INTEGER PRIMARY KEY,
+    object_id INTEGER NOT NULL REFERENCES astronomical_objects(id) ON DELETE CASCADE,
+    catalog TEXT NOT NULL,           -- gaia_dr3 | ps1_dr2 | sdss_dr18 | ls_dr10 | simbad | ned | alerce_ztf | ...
+    cat_id TEXT,
+    ra REAL, dec REAL,
+    sep_arcsec REAL,
+    p_match REAL,                    -- posterior probability that this is the same source
+    rank INTEGER,                    -- 1 = best candidate in this catalogue
+    ambiguous INTEGER DEFAULT 0,     -- several plausible candidates (blending / crowding)
+    pm_corrected INTEGER DEFAULT 0,
+    data TEXT                        -- JSON: magnitudes, morphology, redshift, parallax, provenance
+);
+CREATE TABLE IF NOT EXISTS historical_observations (
+    id INTEGER PRIMARY KEY,
+    object_id INTEGER NOT NULL REFERENCES astronomical_objects(id) ON DELETE CASCADE,
+    survey TEXT NOT NULL,
+    epoch REAL,                      -- decimal year (mid-time of the observation / catalogue mean epoch)
+    mjd REAL,
+    band TEXT,
+    mag REAL, mag_err REAL,
+    upper_limit INTEGER DEFAULT 0,   -- 1 = non-detection, mag is the survey depth there
+    estimated INTEGER DEFAULT 0,     -- 1 = derived (e.g. converted between photometric systems)
+    source TEXT,                     -- provenance: catalogue / table / query
+    data TEXT
+);
+CREATE TABLE IF NOT EXISTS scientific_evidence (
+    id INTEGER PRIMARY KEY,
+    object_id INTEGER NOT NULL REFERENCES astronomical_objects(id) ON DELETE CASCADE,
+    claim_type TEXT NOT NULL,        -- catalog_fact | measurement | model_prediction | inference | missing
+    statement TEXT NOT NULL,
+    source TEXT,
+    confidence REAL,
+    data TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS model_versions (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    version TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    metrics TEXT,
+    notes TEXT,
+    UNIQUE (name, version)
+);
+CREATE INDEX IF NOT EXISTS idx_xm_object ON cross_survey_matches(object_id);
+CREATE INDEX IF NOT EXISTS idx_hist_object ON historical_observations(object_id);
+CREATE INDEX IF NOT EXISTS idx_ev_object ON scientific_evidence(object_id);
 CREATE INDEX IF NOT EXISTS idx_det_image ON detections(image_id);
 CREATE INDEX IF NOT EXISTS idx_alerts_mjd ON alerts(lastmjd);
 """
@@ -112,7 +174,8 @@ def connect() -> sqlite3.Connection:
     con.execute("PRAGMA foreign_keys=ON")
     con.executescript(SCHEMA)
     dcols = {r[1] for r in con.execute("PRAGMA table_info(detections)")}
-    for col, typ in (("cnn_label", "TEXT"), ("cnn_conf", "REAL"), ("cnn_probs", "TEXT")):   # galaxy CNN output
+    for col, typ in (("cnn_label", "TEXT"), ("cnn_conf", "REAL"), ("cnn_probs", "TEXT"),   # galaxy CNN output
+                     ("ra", "REAL"), ("dec", "REAL")):                                       # sky position (from the WCS)
         if col not in dcols:
             con.execute(f"ALTER TABLE detections ADD COLUMN {col} {typ}")
     cols = {r[1] for r in con.execute("PRAGMA table_info(alerts)")}

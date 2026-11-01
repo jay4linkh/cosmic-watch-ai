@@ -336,3 +336,15 @@ wheretheiss.at; Mars training data Lu & Wagstaff (NASA/JPL); SIMBAD (CDS, via th
 planet textures Solar System Scope (CC BY 4.0); sky backgrounds from the DESI Legacy
 Imaging Surveys (legacysurvey.org). Galaxy CNN v2 starts from [Zoobot](https://github.com/mwalmsley/zoobot)
 (Walmsley et al.), and the deep-zoom viewer is [OpenSeadragon](https://openseadragon.github.io/).
+
+## Cross-survey intelligence (`cosmic_watch/xsurvey/`)
+
+For every alert, GCN afterglow and JWST/Hubble detection, the archives are asked what was already there:
+Gaia DR3, Pan-STARRS1, SDSS DR18, Legacy Surveys DR10, SIMBAD, NED, ZTF and JPL asteroid ephemerides.
+
+- **Matching**: Bayesian (separation vs local source density), with Gaia proper motions applied and blends flagged. Validated against Gaia's own PS1 cross-match (`python -m cosmic_watch.xsurvey.validate`).
+- **Hubble/JWST positions**: WCS read from the science mosaic's header with an HTTP range request (only the header is fetched).
+- **Verdicts**: variable star, quasar/AGN, nuclear transient, supernova with host and absolute magnitude, hostless transient (only when the surveys were deep enough to see it), known asteroid.
+- **Evidence**: every claim is tagged catalogue fact, measurement, model, rule or missing. A service that is down counts as missing, never as negative.
+- **Learning**: archive star/galaxy labels feed active learning, and a model that agrees less with the archives is rejected.
+- API: `/api/xsurvey/{stats,alert/{survey}/{oid},detection/{id},gcn/{event},image/{id},position}`. The pipeline source `xsurvey` runs in a background thread every 10 minutes.

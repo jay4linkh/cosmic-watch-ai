@@ -165,8 +165,16 @@ def run_learn(con) -> int:
     return int(msg.startswith("training started"))
 
 
+def run_xsurvey(con) -> int:
+    """Cross-survey intelligence: archive evidence for new alerts, bursts and JWST/Hubble detections (background thread)."""
+    from .xsurvey import worker
+    started = worker.start()
+    log.info("[xsurvey] %s; last batch: %s", "batch started" if started else "previous batch still running", worker.STATE["last"])
+    return sum(v for k, v in (worker.STATE["last"] or {}).items() if k in ("alerts", "gcn", "detections"))
+
+
 SOURCES = {"sdo": run_sdo, "mast": run_mast, "alerts": run_alerts, "spacewx": run_spacewx, "gw": run_gw,
-           "gcn": run_gcn, "mars": run_mars, "neo": run_neo, "learn": run_learn}
+           "gcn": run_gcn, "mars": run_mars, "neo": run_neo, "learn": run_learn, "xsurvey": run_xsurvey}
 
 
 RETRY_AFTER_ERROR_S = 120

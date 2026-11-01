@@ -23,6 +23,7 @@ INTERVALS = {
     "mars": 3 * 3600,    # Perseverance + Curiosity raw images (new every sol)
     "neo": 6 * 3600,     # JPL close approaches, Sentry, fireballs
     "learn": 20 * 60,    # active learning: retrain the galaxy CNN when enough new labels arrived
+    "xsurvey": 10 * 60,  # cross-survey evidence for new alerts / bursts / JWST-Hubble detections (background batches)
 }
 
 # MAST: how far back to look for newly public images, and how many to process per run.

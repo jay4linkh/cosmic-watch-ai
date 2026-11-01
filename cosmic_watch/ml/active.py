@@ -161,7 +161,7 @@ class _Images:
         return self.cache[image_id]
 
 
-def build_pool(con, size=SIZE, cap_star=700, cap_gas=600, cap_pseudo=2500):
+def build_pool(con, size=SIZE, cap_star=700, cap_gas=600, cap_pseudo=2500, cap_archive=600):
     """-> list of dicts {x (uint8), fine, group, w, kind, holdout}. fine/group = -1 when unknown."""
     from .explain_lite import concentration, field_suspicion
     images = _Images(con)
@@ -192,6 +192,27 @@ def build_pool(con, size=SIZE, cap_star=700, cap_gas=600, cap_pseudo=2500):
         add(image_id, d, -1 if fine is None else fine, GROUPS.index(group) if group else -1, 3.0, "user", r["key"])
     n_user = len(pool)
 
+    # archive labels (cross-survey engine): Gaia parallax / SIMBAD / SDSS say star or galaxy; they outrank the detector
+    archive = {}
+    try:
+        for r in con.execute("SELECT ref, verdict, verdict_conf FROM astronomical_objects WHERE kind='detection' AND verdict IN "
+                             "('catalog_star', 'catalog_galaxy') AND verdict_conf >= 0.6"):
+            archive[int(r["ref"].split(":")[2])] = r["verdict"]
+    except Exception:  # noqa: BLE001  (table missing on old databases)
+        pass
+    per_arch, n_arch = {}, {"catalog_star": 0, "catalog_galaxy": 0}
+    if archive:
+        q = ",".join(str(i) for i in archive)
+        for d in con.execute(f"SELECT image_id, id, x, y, a FROM detections WHERE id IN ({q}) ORDER BY image_id, score DESC"):
+            v = archive[d["id"]]
+            if d["image_id"] not in meta or n_arch[v] >= cap_archive or per_arch.get((d["image_id"], v), 0) >= 40:
+                continue
+            per_arch[(d["image_id"], v)] = per_arch.get((d["image_id"], v), 0) + 1
+            n_arch[v] += 1
+            # a galaxy of unknown type: group -2 = "any galaxy class" (loss pushes P(not a galaxy) down)
+            add(d["image_id"], d, NG if v == "catalog_star" else -1, -1 if v == "catalog_star" else -2, 1.0,
+                "archive_star" if v == "catalog_star" else "archive_galaxy", f"a{d['id']}")
+
     # weak "Not a galaxy": bright stars the detector is sure about, and flat patches in nebula fields
     stars = con.execute("""SELECT d.image_id, d.id, d.x, d.y, d.a FROM detections d JOIN images i ON i.id = d.image_id
                            WHERE i.source IN ('jwst','hst') AND d.label = 'star' ORDER BY d.image_id, d.score DESC""").fetchall()
@@ -200,6 +221,8 @@ def build_pool(con, size=SIZE, cap_star=700, cap_gas=600, cap_pseudo=2500):
         if sum(1 for p in pool if p["kind"] == "star") >= cap_star:
             break
         if per.get(d["image_id"], 0) >= 20 or _solar(meta.get(d["image_id"], {"target": ""})["target"]):
+            continue
+        if d["id"] in archive:            # the archives already decided (and may say it is a galaxy)
             continue
         per[d["image_id"]] = per.get(d["image_id"], 0) + 1
         add(d["image_id"], d, NG, -1, 0.4, "star", f"s{d['id']}")
@@ -229,8 +252,8 @@ def build_pool(con, size=SIZE, cap_star=700, cap_gas=600, cap_pseudo=2500):
             add(d["image_id"], d, CLASSES.index(d["cnn_label"]), -1, 0.7, "pseudo", f"p{d['id']}")
             n_pseudo += 1
             per_pseudo[d["image_id"]] = per_pseudo.get(d["image_id"], 0) + 1
-    log.info("pool: %d user, %d stars, %d gas, %d pseudo-galaxies", n_user,
-             sum(1 for p in pool if p["kind"] == "star"), n_gas, n_pseudo)
+    log.info("pool: %d user, %d archive stars, %d archive galaxies, %d stars, %d gas, %d pseudo-galaxies", n_user,
+             n_arch["catalog_star"], n_arch["catalog_galaxy"], sum(1 for p in pool if p["kind"] == "star"), n_gas, n_pseudo)
     return pool
 
 
@@ -302,6 +325,12 @@ def evaluate(model, dev, g10_val, hold, ten_class=False):
     if ps:
         p = _probs(model, np.stack([h["x"] for h in ps]), dev)
         m["galaxy_false_positive"] = 0.0 if ten_class else round(float((p.argmax(1) == NG).mean()), 4)
+    ar = [h for h in hold if h["kind"] in ("archive_star", "archive_galaxy")]
+    if ar and not ten_class:              # independent truth: Gaia / SIMBAD / SDSS, not our own detector
+        p = _probs(model, np.stack([h["x"] for h in ar]), dev)
+        truth = np.array([h["kind"] == "archive_star" for h in ar])
+        m["archive_agreement"] = round(float(((p.argmax(1) == NG) == truth).mean()), 4)
+        m["archive_n"] = len(ar)
     return m
 
 
@@ -315,6 +344,8 @@ def gate(champ, chall):
         reasons.append(f"not-a-galaxy recall too low ({chall['not_galaxy_recall']:.3f})")
     if "galaxy_false_positive" in chall and chall["galaxy_false_positive"] > max(0.1, champ.get("galaxy_false_positive", 0) + 0.02):
         reasons.append(f"too many real galaxies called 'not a galaxy' ({chall['galaxy_false_positive']:.3f})")
+    if "archive_agreement" in chall and "archive_agreement" in champ and chall["archive_agreement"] < champ["archive_agreement"] - 0.03:
+        reasons.append(f"agreement with the archives fell {champ['archive_agreement']:.3f} -> {chall['archive_agreement']:.3f}")
     return not reasons, reasons
 
 
@@ -389,6 +420,10 @@ def train_round(epochs=3, g10_per_epoch=6000, batch=64):
             if g.any():
                 pg = logits[g].softmax(1) @ grp.T
                 loss = loss + (F.nll_loss(torch.log(pg.clamp_min(1e-6)), group[g], reduction="none") * w[g]).mean()
+            a = (~f) & (group == -2)
+            if a.any():                     # archive says "a galaxy", type unknown
+                p_ng = logits[a].softmax(1)[:, NG]
+                loss = loss + (-torch.log((1 - p_ng).clamp_min(1e-6)) * w[a]).mean()
             opt.zero_grad(set_to_none=True)
             scaler.scale(loss).backward()
             scaler.step(opt)
