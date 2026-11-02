@@ -467,3 +467,7 @@ body.inspecting #feed, body.deepzoom #feed { display: none; }
 .xs-hist { display: grid; grid-template-columns: 44px auto 1fr; gap: 2px 8px; font-size: 11px; }
 .xs-hist span { font-family: var(--mono); color: #9aa7b8; }
 .xs-hist em { font-style: normal; color: #9aa7b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.dz-diag { width: 100%; border-radius: 6px; margin-top: 6px; image-rendering: pixelated; }
+.dz-top .dz-restore { border-color: rgba(103,232,249,0.45); background: rgba(103,232,249,0.08); }
+.dz-top .dz-restore.on { background: rgba(103,232,249,0.22); color: #e6f9fc; }

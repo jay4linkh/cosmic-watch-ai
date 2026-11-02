@@ -89,6 +89,7 @@ export function createDeepZoom({ onClose, toast }) {
     <div class="dz-top">
       <button class="dz-close">← Back to 3D</button>
       <div class="dz-title"><span class="dz-kicker"></span><b></b></div>
+      <button class="dz-restore" hidden title="Original science pixels vs scientific restoration (R)">◐ Original</button>
       <button class="dz-ai" hidden title="Add a super-resolution level past the real pixels (E)">✨ AI enhance: off</button>
       <button class="dz-toggle on" title="Show / hide what the AI found (snap)">AI overlay</button>
     </div>
@@ -101,11 +102,14 @@ export function createDeepZoom({ onClose, toast }) {
   let OSD = null, viewer = null, spec = null, info = null;
   let overlays = [], overlaysOn = true, armed = false, openedAt = 0, token = 0, sciTimer = null;
   let aiModel = null;              // null | 'swinir' | 'esrgan'
+  let restoreMode = null;          // null (original) | 'conservative' | 'aggressive'
+  let restoreTimer = null;
   const AI_ORDER = [null, 'swinir', 'esrgan'];
 
   $('.dz-close').addEventListener('click', () => close());
   $('.dz-toggle').addEventListener('click', () => toggleOverlay());
   $('.dz-ai').addEventListener('click', () => cycleAI());
+  $('.dz-restore').addEventListener('click', () => cycleRestore());
 
   function ensureViewer() {
     if (viewer) return viewer;
@@ -136,7 +140,8 @@ export function createDeepZoom({ onClose, toast }) {
 
   function tileSource(i, minSide = 256) {
     const levels = Math.floor(Math.log2(Math.max(i.width, i.height) / minSide));
-    const real = (l, x, y) => i.tiles.replace('{level}', l).replace('{x}', x).replace('{y}', y);
+    const base = restoreMode && i.restore?.[restoreMode]?.state === 'ready' ? i.restore[restoreMode].tiles : i.tiles;
+    const real = (l, x, y) => base.replace('{level}', l).replace('{x}', x).replace('{y}', y);
     if (aiModel && i.ai?.available) {
       // Twice the size: levels up to maxLevel are the real tiles unchanged, maxLevel + 1 is AI-made.
       return {
@@ -174,6 +179,63 @@ export function createDeepZoom({ onClose, toast }) {
     b.classList.toggle('on', !!aiModel);
     b.textContent = aiModel ? `✨ AI: ${info.ai.models[aiModel].name}` : '✨ AI enhance: off';
     b.title = aiModel ? `${info.ai.models[aiModel].note}. Click for the next model / off (E)` : 'Add a super-resolution level past the real pixels (E)';
+  }
+
+  // ---------- scientific restoration: same measured pixels, background removed, better display curve ----------
+  const RESTORE_ORDER = [null, 'conservative', 'aggressive'];
+  const RESTORE_NAME = { conservative: 'Restored', aggressive: 'Restored+' };
+
+  function restoreButton() {
+    const b = $('.dz-restore');
+    b.hidden = !(spec?.kind === 'image' && info?.restore);
+    b.classList.toggle('on', !!restoreMode);
+    b.textContent = restoreMode ? `◑ ${RESTORE_NAME[restoreMode]}` : '◐ Original';
+  }
+
+  function restoreCard(rep) {
+    if (!rep) return;
+    const v = rep.validation || {}, j = rep.injection || {}, u = rep.uniformity || {};
+    const ok = (b) => (b ? '<b style="color:#4ade80">pass</b>' : '<b style="color:#f87171">FAIL</b>');
+    card(`<div class="dz-card-k">SCIENTIFIC RESTORATION · ${esc(rep.preset).toUpperCase()}</div>
+      <p>Measured pixels only: a smooth background was removed (galaxies masked first, so their halos stay) and the
+      display curve was tuned to the noise. <b>No pixel was invented.</b> The original FITS file is untouched.</p>
+      <div class="dz-facts">
+        <span>Instrument</span><b>${esc(rep.meta.telescope)} ${esc(rep.meta.instrument)} ${esc(rep.meta.filter || '')}</b>
+        <span>Sky flatness</span><b>${u.before ?? '—'} → ${u.after ?? '—'} σ</b>
+        <span>Injected stars kept</span><b>${j.point_flux_ratio_median != null ? Math.round(j.point_flux_ratio_median * 100) + '%' : '—'}</b>
+        <span>Faint big galaxies kept</span><b>${j.disk_flux_ratio_median != null ? Math.round(j.disk_flux_ratio_median * 100) + '% (median)' : '—'}</b>
+        <span>Validation</span>${ok(v.passed)}
+      </div>
+      <p class="dz-hint">Validation injects fake stars and faint galaxies of known brightness, reruns the background step and
+      measures how much light survives. Background mesh ${rep.background.mesh} px · ${rep.timings_s ? Object.values(rep.timings_s).reduce((a, b) => a + b, 0).toFixed(0) : '?'} s.
+      ${rep.validation?.passed ? '' : 'This preset failed validation: treat it as display only.'}</p>
+      <img class="dz-diag" src="/api/dz/image/${spec.imageId}/restore/diagnostic.png?preset=${rep.preset}" alt="background model | source mask">
+      <p class="dz-hint">Left: the background that was removed. Right: what was protected as sources.</p>`);
+  }
+
+  async function cycleRestore() {
+    if (spec?.kind !== 'image' || !info?.restore) return;
+    clearTimeout(restoreTimer);
+    const my = token;
+    const next = RESTORE_ORDER[(RESTORE_ORDER.indexOf(restoreMode) + 1) % RESTORE_ORDER.length];
+    if (!next) { restoreMode = null; restoreButton(); reopen(my, () => toast?.('Original science pixels', '#4ade80')); return; }
+    const poll = async () => {
+      const st = await fetch(`/api/dz/image/${spec.imageId}/restore?preset=${next}`, { method: 'POST' }).then((r) => r.json()).catch(() => null);
+      if (my !== token || !st) return;
+      if (st.state === 'ready') {
+        info = await fetch(`/api/dz/image/${spec.imageId}`).then((r) => r.json());
+        if (my !== token) return;
+        restoreMode = next;
+        restoreButton();
+        reopen(my, () => { restoreCard(st.report); toast?.(`${RESTORE_NAME[next]}: background removed, nothing invented`, '#67e8f9'); });
+        return;
+      }
+      if (st.state === 'failed') { toast?.(`Restoration failed: ${st.error || 'error'}`, '#f87171'); return; }
+      $('.dz-restore').textContent = st.state === 'fetching_fits'
+        ? `◐ fetching FITS… ${Math.round(((st.science || {}).progress || 0) * 100)}%` : '◐ restoring… (~2 min)';
+      restoreTimer = setTimeout(poll, 4000);
+    };
+    poll();
   }
 
   function cycleAI() {
@@ -432,7 +494,10 @@ export function createDeepZoom({ onClose, toast }) {
     spec = s;
     armed = false;
     aiModel = null;
+    restoreMode = null;
+    clearTimeout(restoreTimer);
     $('.dz-ai').hidden = true;
+    $('.dz-restore').hidden = true;
     root.classList.add('open');
     document.body.classList.add('deepzoom');
     $('.dz-kicker').textContent = s.kicker || '';
@@ -463,6 +528,7 @@ export function createDeepZoom({ onClose, toast }) {
           imageOverlays(my);
           upgradeToScience(my);
           aiButton();
+          restoreButton();
         }
         sourceLine();
         openedAt = performance.now();
@@ -497,7 +563,7 @@ export function createDeepZoom({ onClose, toast }) {
 
   return {
     get isOpen() { return root.classList.contains('open'); },
-    open, close, toggleOverlay, cycleAI,
+    open, close, toggleOverlay, cycleAI, cycleRestore,
     // hand / keyboard control
     zoomBy(f) { if (viewer && info) { viewer.viewport.zoomBy(f); viewer.viewport.applyConstraints(); } },
     panBy(dx, dy) {

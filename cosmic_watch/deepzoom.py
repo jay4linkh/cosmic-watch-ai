@@ -105,6 +105,54 @@ def _image_row(image_id):
     return r, p
 
 
+FITS_DIR = SCIENCE_DIR / "fits"
+RESTORED_DIR = SCIENCE_DIR / "restored"
+_restore: dict[tuple, dict] = {}                  # (image id, preset) -> {"state", "error", "report"}
+
+
+def _fits_path(image_id) -> Path:
+    return FITS_DIR / f"{image_id}.fits"
+
+
+def _restored_png(image_id, preset) -> Path:
+    from .imaging.pipeline import VERSION
+    return RESTORED_DIR / f"{image_id}_{preset}_{VERSION}.png"
+
+
+def _restore_status(image_id, preset):
+    p = _restored_png(image_id, preset)
+    if p.exists():
+        rp = p.with_suffix(".json")
+        return {"state": "ready", "report": json.loads(rp.read_text(encoding="utf-8")) if rp.exists() else None}
+    return _restore.get((image_id, preset), {"state": "available" if _fits_path(image_id).exists() else "needs_fits"})
+
+
+def _run_restore(image_id, preset):
+    """Background: FITS -> background model -> validation -> display PNG on the detections' pixel grid."""
+    from .imaging import pipeline
+    st = _restore[(image_id, preset)]
+    with _science_lock:
+        try:
+            r, prev = _image_row(image_id)
+            img, _, report, diag = pipeline.restore(_fits_path(image_id), preset)
+            img = img[::-1]                                       # FITS rows run bottom-up
+            with Image.open(prev) as im:
+                if im.size != (img.shape[1], img.shape[0]):
+                    img = cv2.resize(img, im.size, interpolation=cv2.INTER_AREA)
+            out = _restored_png(image_id, preset)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            cv2.imwrite(str(out), np.ascontiguousarray(img))
+            pipeline.diagnostic_png({k: v[::-1] for k, v in diag.items()}, out.with_name(out.stem + "_diag.png"))
+            out.with_suffix(".json").write_text(json.dumps(report, default=str), encoding="utf-8")
+            with _pyr_lock:
+                _pyr.pop((image_id, f"restored-{preset}"), None)
+            st.update(state="ready", report=report)
+            log.info("restored image %s (%s): validation passed=%s", image_id, preset, report.get("validation", {}).get("passed"))
+        except Exception as e:  # noqa: BLE001
+            log.warning("restore of image %s failed: %s", image_id, e)
+            st.update(state="failed", error=str(e)[:200])
+
+
 def _science_png(image_id) -> Path:
     return SCIENCE_DIR / f"{image_id}.png"
 
@@ -125,7 +173,7 @@ def _science_uris(r):
 
 
 def _fetch_science(image_id):
-    """Background: download the science mosaic, stretch it, keep a lossless PNG, drop the FITS."""
+    """Background: download the science mosaic, stretch it, keep a lossless PNG AND the FITS (source of truth)."""
     from astropy.io import fits
     st = _science[image_id]
     with _science_lock:
@@ -158,8 +206,10 @@ def _fetch_science(image_id):
                 if prev.size != (img.shape[1], img.shape[0]):   # keep the detections' pixel grid
                     img = cv2.resize(img, prev.size, interpolation=cv2.INTER_AREA)
             cv2.imwrite(str(_science_png(image_id)), np.ascontiguousarray(img))
+            FITS_DIR.mkdir(parents=True, exist_ok=True)
+            part.replace(_fits_path(image_id))       # never modified afterwards; restoration reads it
             with _pyr_lock:
-                _pyr.pop(image_id, None)
+                _pyr.pop((image_id, None), None)
             st.update(state="ready", progress=1.0)
             log.info("science data ready for image %s (%s)", image_id, r["external_id"])
         except Exception as e:  # noqa: BLE001
@@ -169,14 +219,21 @@ def _fetch_science(image_id):
             part.unlink(missing_ok=True)
 
 
-def _pyramid(image_id):
+def _pyramid(image_id, variant=None):
+    key = (image_id, variant)
     with _pyr_lock:
-        if image_id in _pyr:
-            _pyr.move_to_end(image_id)
-            return _pyr[image_id]
+        if key in _pyr:
+            _pyr.move_to_end(key)
+            return _pyr[key]
     r, p = _image_row(image_id)
     sci = _science_png(image_id)
-    if sci.exists():
+    if variant and variant.startswith("restored-"):
+        rp = _restored_png(image_id, variant[len("restored-"):])
+        if not rp.exists():
+            raise HTTPException(404, "not restored yet")
+        bgr = cv2.cvtColor(cv2.imread(str(rp), cv2.IMREAD_GRAYSCALE), cv2.COLOR_GRAY2BGR)
+        kind = variant
+    elif sci.exists():
         bgr = cv2.cvtColor(cv2.imread(str(sci), cv2.IMREAD_GRAYSCALE), cv2.COLOR_GRAY2BGR)
         kind = "science"
     else:
@@ -192,7 +249,7 @@ def _pyramid(image_id):
             bgr[outside] = 0
     entry = {"full": bgr, "max": _levels(bgr.shape[1], bgr.shape[0]), "scaled": {}, "kind": kind}
     with _pyr_lock:
-        _pyr[image_id] = entry
+        _pyr[key] = entry
         while len(_pyr) > PYR_KEEP:
             _pyr.popitem(last=False)
     return entry
@@ -219,9 +276,44 @@ def image_info(image_id: int):
     kind = "science" if sci["state"] == "ready" else "preview"
     return {"width": w, "height": h, "tileSize": TILE, "tileOverlap": 1, "maxLevel": _levels(w, h),
             "source": r["source"], "data": kind, "science": sci,
+            "restore": {pr: {**{k: v for k, v in _restore_status(image_id, pr).items() if k != "report"},
+                             "tiles": f"/api/dz/image/{image_id}/{{level}}/{{x}}_{{y}}.jpg?v={IMG_TILE_VERSION}&d=restored-{pr}"}
+                        for pr in ("conservative", "aggressive")} if r["source"] in ("jwst", "hst") else None,
             "ai": {"available": sr_available(), "models": {k: {"name": v["name"], "note": v["note"]} for k, v in SR_MODELS.items()},
                    "tiles": f"/api/dz/image/{image_id}/ai/{{model}}/{{x}}_{{y}}.jpg?v={IMG_TILE_VERSION}&d={kind}"},
             "tiles": f"/api/dz/image/{image_id}/{{level}}/{{x}}_{{y}}.jpg?v={IMG_TILE_VERSION}&d={kind}"}
+
+
+@router.post("/api/dz/image/{image_id}/restore")
+def image_restore(image_id: int, preset: str = "conservative"):
+    """Start (once) the scientific restoration of the science FITS. Fetches the FITS first when it is missing."""
+    from .imaging.pipeline import PRESETS
+    if preset not in PRESETS:
+        raise HTTPException(400, f"preset must be one of {list(PRESETS)}")
+    r, _ = _image_row(image_id)
+    if r["source"] not in ("jwst", "hst"):
+        raise HTTPException(400, "restoration needs a JWST / Hubble science mosaic")
+    st = _restore_status(image_id, preset)
+    if st["state"] == "needs_fits":
+        sci = _science_status(image_id, r["source"])
+        if not _fits_path(image_id).exists() and sci["state"] in ("available", "failed", "ready"):
+            _science_png(image_id).unlink(missing_ok=True)      # older runs dropped the FITS: fetch it again
+            _science[image_id] = {"state": "fetching", "progress": 0.0}
+            threading.Thread(target=_fetch_science, args=(image_id,), daemon=True).start()
+        return {"state": "fetching_fits", "science": _science.get(image_id)}
+    if st["state"] in ("available", "failed"):
+        st = _restore[(image_id, preset)] = {"state": "processing"}
+        threading.Thread(target=_run_restore, args=(image_id, preset), daemon=True).start()
+    return {k: v for k, v in st.items() if k != "report"} | ({"report": st["report"]} if st.get("report") else {})
+
+
+@router.get("/api/dz/image/{image_id}/restore/diagnostic.png")
+def image_restore_diag(image_id: int, preset: str = "conservative"):
+    p = _restored_png(image_id, preset)
+    d = p.with_name(p.stem + "_diag.png")
+    if not d.exists():
+        raise HTTPException(404)
+    return FileResponse(d)
 
 
 @router.post("/api/dz/image/{image_id}/science")
@@ -237,7 +329,7 @@ def image_science(image_id: int):
 
 @router.get("/api/dz/image/{image_id}/{level}/{xy}.jpg")
 def image_tile(image_id: int, level: int, xy: str, d: str = "preview"):
-    entry = _pyramid(image_id)
+    entry = _pyramid(image_id, d if d.startswith("restored-") else None)
     out = TILE_DIR / f"img-v{IMG_TILE_VERSION}" / entry["kind"] / str(image_id) / str(level) / f"{xy}.jpg"
     if not out.exists():
         try:
@@ -253,7 +345,7 @@ def image_tile(image_id: int, level: int, xy: str, d: str = "preview"):
         if x0 >= w or y0 >= h:
             raise HTTPException(404)
         out.parent.mkdir(parents=True, exist_ok=True)
-        q = SCIENCE_Q if entry["kind"] == "science" else JPEG_Q
+        q = JPEG_Q if entry["kind"] == "preview" else SCIENCE_Q
         cv2.imwrite(str(out), im[y0:y1, x0:x1], [cv2.IMWRITE_JPEG_QUALITY, q])
     return FileResponse(out, headers={"Cache-Control": "public, max-age=604800"})
 

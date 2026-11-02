@@ -666,6 +666,7 @@ addEventListener('keydown', async (e) => {
   else if ((e.key === 'o' || e.key === 'O') && dz.isOpen) dz.toggleOverlay();
   else if ((e.key === 't' || e.key === 'T') && !dz.isOpen && !state.inspecting) teacher.open();
   else if ((e.key === 'e' || e.key === 'E') && dz.isOpen) dz.cycleAI();
+  else if ((e.key === 'r' || e.key === 'R') && dz.isOpen) dz.cycleRestore();
   else if (e.key === 'Escape') { if (!$('#lightbox').hidden) closeMovie(); else if (dz.isOpen) dz.close(); else if (state.inspecting) closeInspect(); else $('#detail').classList.remove('open'); }
 });
 
