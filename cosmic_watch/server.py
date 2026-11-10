@@ -231,8 +231,9 @@ def detections(image_id: int, limit: int = Query(4000, le=20000)):
         raise HTTPException(404)
     stats = json.loads(img[0]["stats"] or "{}")
     w, h = stats.get("size") or [1024, 1024]
+    # once the science catalogue exists, preview detections it did not confirm are left out (they stay in the database)
     dets = rows("""SELECT id, label, x, y, a, b, theta, score, cnn_label, cnn_conf FROM detections
-                   WHERE image_id=? ORDER BY score DESC LIMIT ?""", (image_id, limit))
+                   WHERE image_id=? AND (det_mode IS NULL OR det_mode NOT IN ('preview-only', 'stale')) ORDER BY score DESC LIMIT ?""", (image_id, limit))
     labels = sorted({d["label"] for d in dets})
     idx = {l: i for i, l in enumerate(labels)}
     return {
@@ -586,11 +587,11 @@ class FeedbackIn(BaseModel):
 
 
 @app.get("/api/agent/suggestion")
-def agent_suggestion(exclude: str = ""):
+def agent_suggestion(exclude: str = "", view: str = ""):
     con = db.connect()
     try:
         ex = {int(x) for x in exclude.split(",") if x.strip().isdigit()}
-        return {"suggestion": agent.suggest(con, ex), "stats": agent.stats(con)}
+        return {"suggestion": agent.suggest(con, ex, view or None), "stats": agent.stats(con)}
     finally:
         con.close()
 

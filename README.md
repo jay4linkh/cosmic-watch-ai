@@ -348,3 +348,48 @@ Gaia DR3, Pan-STARRS1, SDSS DR18, Legacy Surveys DR10, SIMBAD, NED, ZTF and JPL 
 - **Evidence**: every claim is tagged catalogue fact, measurement, model, rule or missing. A service that is down counts as missing, never as negative.
 - **Learning**: archive star/galaxy labels feed active learning, and a model that agrees less with the archives is rejected.
 - API: `/api/xsurvey/{stats,alert/{survey}/{oid},detection/{id},gcn/{event},image/{id},position}`. The pipeline source `xsurvey` runs in a background thread every 10 minutes.
+
+## Solar System world (`web/js/views/solar.js`) and generative score (`web/js/music.js`)
+
+- **Real positions**: the planets from JPL's Keplerian elements (valid 1800–2050, checked against astropy to about 0.2°), the Moon from a low-precision series (about 1.5°).
+- **Time bar**: pause, run forwards or backwards from real time up to a year per second, or jump back to NOW.
+- **Follow any world**: click a planet (or a row in the table) to ride along with it and zoom to just above the surface; live distance, light time and orbital speed update as time runs.
+- **Lit by the Sun only**: real phases, Earth's seasons and day side, Saturn's shadow on its rings.
+- **Honest labels**: sizes are exaggerated, distances are square-root compressed unless you pick *True distances*; gas-giant surfaces, Earth's clouds, the asteroid belt and the Milky Way's texture are procedural.
+- **Music**: an ambient score synthesised live in the browser (Web Audio, no audio files). Toggle with ♪ or `M`.
+
+## Science-grade detection on the FITS (`cosmic_watch/imaging/detect.py`, `catalog_db.py`)
+
+- **Multi-scale**: a *cold* pass keeps bright and extended objects whole, a *hot* pass adds faint and tiny ones, and binned passes look for large diffuse light.
+- **Measured purity**: every pass also runs on the sign-flipped image, where anything found is noise. Thresholds rise until that rate is under 3%, and a pass that cannot beat it is dropped.
+- **Correlated noise handled**: the detection image is scaled by the noise measured on empty sky, not by the textbook formula (drizzled mosaics are correlated).
+- **Measurements**: Kron fluxes, AB magnitudes from the header keywords, half-light radius, size class (point, micro, small, medium, large, giant), RA/Dec.
+- **Measured completeness**: fake galaxies of each size and brightness are injected and counted; chance matches in crowded fields are subtracted.
+- **Non-destructive**: existing detections keep their ids (labels and CNN results stay valid); preview detections the FITS does not confirm are hidden, not deleted.
+- Run with `python -m cosmic_watch.imaging.detect <image_id>` or the button in deep zoom; download as ECSV from `/api/dz/image/{id}/catalog.ecsv`.
+- The agent no longer asks to be taught; the teach panel is still on `T`.
+
+## Sun, in solar coordinates (`cosmic_watch/detectors/sun.py`)
+
+- Limb fitted (visible light) or taken from the ephemeris (EUV); limb darkening fitted and removed.
+- Every spot, active region and coronal hole gets a heliographic latitude / longitude and a foreshortening-corrected area (millionths of the hemisphere).
+- Spots are grouped; groups are matched to NOAA's numbered regions for the day, and the agreement is stored with the image.
+- Coronal-hole candidates from AIA 193 Å, with a flag when one faces Earth.
+
+## Mars: what is where (`cosmic_watch/ml/mars_features.py`)
+
+- **Rock candidates** on scenes the CNN calls loose rocks or sand: patches that differ from the smooth ground in brightness or texture, with count, ground cover and size distribution in pixels. Not run on bedrock, close-ups or far views, where it was tested and marks shadows and cracks.
+- **CNN regions**: the scene CNN slid over the image; an area is outlined only when overlapping windows agree with high confidence (rare by design).
+
+## Interface
+
+- Deep Field images are browsed with a **date slider** (per-day counts underneath) instead of a strip of names.
+- The top bar hides in deep zoom; the agent only talks about the world you are in and falls back to tips for it.
+- Three generated music tracks (Drift, Aurora, Abyss): ♪ or `M` cycles them.
+
+## The Milky Way opening and the journey view
+
+- The Solar System tab opens far outside the **Milky Way** and flies in to the planets (replay it from the panel; touching the camera hands control to you). Scroll all the way out any time to return to the galaxy.
+- The galaxy is a painted model (a shader: spiral arms, dust lanes, bar, star-forming knots), not a photograph. Its plane, the direction of its centre and the direction the Sun travels are the real ones.
+- **Journey through the galaxy** shows the planets' paths as coils behind the moving Sun. The geometry is real; the Sun's forward speed is drawn about 90× slower than its true 230 km/s so the coils are visible.
+- Every picker at the bottom is a **glider**: a highlight that slides to your choice. Deep Field has two rows, days (with image counts) and that day's images.

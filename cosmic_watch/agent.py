@@ -42,11 +42,13 @@ def _prefs(con):
     return {r["kind"]: (r["alpha"], r["beta"]) for r in rows}
 
 
-def suggest(con, exclude: set[int] | None = None) -> dict | None:
-    """Pick the next anomaly to show (or None)."""
+def suggest(con, exclude: set[int] | None = None, view: str | None = None) -> dict | None:
+    """Pick the next anomaly to show (or None). With `view`, only things that open in that view."""
     exclude = exclude or set()
-    rows = con.execute("""SELECT * FROM anomalies WHERE status='new' ORDER BY id DESC LIMIT 200""").fetchall()
+    rows = con.execute("""SELECT * FROM anomalies WHERE status='new' ORDER BY id DESC LIMIT 600""").fetchall()
     rows = [r for r in rows if r["id"] not in exclude]
+    if view:
+        rows = [r for r in rows if json.loads(r["ref"] or "{}").get("view") == view]
     if not rows:
         return None
     prefs = _prefs(con)

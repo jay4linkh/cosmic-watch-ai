@@ -93,7 +93,7 @@ def _levels(w, h):
 def _image_row(image_id):
     con = db.connect()
     try:
-        r = con.execute("SELECT id, source, external_id, path FROM images WHERE id=?", (image_id,)).fetchone()
+        r = con.execute("SELECT id, source, external_id, path, stats FROM images WHERE id=?", (image_id,)).fetchone()
     finally:
         con.close()
     if not r:
@@ -276,12 +276,67 @@ def image_info(image_id: int):
     kind = "science" if sci["state"] == "ready" else "preview"
     return {"width": w, "height": h, "tileSize": TILE, "tileOverlap": 1, "maxLevel": _levels(w, h),
             "source": r["source"], "data": kind, "science": sci,
+            "catalog": _catalog_status(image_id, r) if r["source"] in ("jwst", "hst") else None,
             "restore": {pr: {**{k: v for k, v in _restore_status(image_id, pr).items() if k != "report"},
                              "tiles": f"/api/dz/image/{image_id}/{{level}}/{{x}}_{{y}}.jpg?v={IMG_TILE_VERSION}&d=restored-{pr}"}
                         for pr in ("conservative", "aggressive")} if r["source"] in ("jwst", "hst") else None,
             "ai": {"available": sr_available(), "models": {k: {"name": v["name"], "note": v["note"]} for k, v in SR_MODELS.items()},
                    "tiles": f"/api/dz/image/{image_id}/ai/{{model}}/{{x}}_{{y}}.jpg?v={IMG_TILE_VERSION}&d={kind}"},
             "tiles": f"/api/dz/image/{image_id}/{{level}}/{{x}}_{{y}}.jpg?v={IMG_TILE_VERSION}&d={kind}"}
+
+
+_catalog: dict[int, dict] = {}                     # image id -> {"state", "error"} while the science detector runs
+
+
+def _catalog_status(image_id, r):
+    from .imaging import catalog_db
+    if image_id in _catalog and _catalog[image_id]["state"] in ("processing", "failed"):
+        return dict(_catalog[image_id])
+    if catalog_db.report_path(image_id).exists():
+        return {"state": "ready", "summary": json.loads(r["stats"] or "{}").get("sci"), "table": f"/api/dz/image/{image_id}/catalog.ecsv"}
+    return {"state": "available" if _fits_path(image_id).exists() else "needs_fits"}
+
+
+def _run_catalog(image_id):
+    from .imaging import catalog_db
+    with _science_lock:                              # one heavy job at a time on this machine
+        try:
+            catalog_db.run(image_id)
+            _catalog[image_id] = {"state": "ready"}
+        except Exception as e:  # noqa: BLE001
+            log.warning("science catalogue for image %s failed: %s", image_id, e)
+            _catalog[image_id] = {"state": "failed", "error": str(e)[:200]}
+
+
+@router.post("/api/dz/image/{image_id}/catalog")
+def image_catalog(image_id: int):
+    """Start (once) the multi-scale science detection on the FITS mosaic; poll until state is ready."""
+    r, _ = _image_row(image_id)
+    if r["source"] not in ("jwst", "hst"):
+        raise HTTPException(400, "the science catalogue needs a JWST / Hubble mosaic")
+    st = _catalog_status(image_id, r)
+    if st["state"] in ("available", "failed"):
+        _catalog[image_id] = st = {"state": "processing"}
+        threading.Thread(target=_run_catalog, args=(image_id,), daemon=True).start()
+    return st
+
+
+@router.get("/api/dz/image/{image_id}/catalog/report")
+def image_catalog_report(image_id: int):
+    from .imaging import catalog_db
+    rep = catalog_db.load_report(image_id)
+    if not rep:
+        raise HTTPException(404, "no science catalogue yet")
+    return rep
+
+
+@router.get("/api/dz/image/{image_id}/catalog.ecsv")
+def image_catalog_table(image_id: int):
+    from .imaging import catalog_db
+    p = catalog_db.table_path(image_id)
+    if not p.exists():
+        raise HTTPException(404, "no science catalogue yet")
+    return FileResponse(p, media_type="text/plain", filename=f"cosmic_watch_image_{image_id}_catalog.ecsv")
 
 
 @router.post("/api/dz/image/{image_id}/restore")
@@ -524,6 +579,57 @@ def _sky_geometry(layer):
     max_level = _levels(SKY_WIDTH, SKY_WIDTH)
     deepest = NATIVE[layer] / OVERSAMPLE        # arcsec per virtual pixel at the deepest level
     return max_level, deepest
+
+
+PIXSCALE = {"lsst": 0.2, "ztf": 1.01}                # arcsec per cutout pixel
+_cut_lock = threading.Lock()
+
+
+def _cutouts(survey, oid):
+    """Raw science / template / difference arrays of an alert, fetched from the broker once and kept."""
+    from .config import STAMP_DIR
+    from .fetchers import alerts
+    if survey not in PIXSCALE or not str(oid).replace("ZTF", "").isalnum():
+        raise HTTPException(404, "unknown alert")
+    p = STAMP_DIR / "raw" / survey / f"{oid}.npz"
+    with _cut_lock:
+        if not p.exists():
+            try:
+                st = alerts.stamps(survey, oid)
+            except Exception as e:  # noqa: BLE001
+                raise HTTPException(502, f"the alert broker did not answer: {str(e)[:120]}")
+            if st is None:
+                raise HTTPException(404, "the broker has no cutouts for this alert")
+            p.parent.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(p, **st)
+        with np.load(p) as z:
+            return {k: z[k] for k in ("science", "template", "difference")}
+
+
+@router.get("/api/dz/alert/{survey}/{oid}/cutout")
+def alert_cutout_info(survey: str, oid: str):
+    from .detectors import stamps
+    st = _cutouts(survey, oid)
+    info = stamps.describe(st)
+    h, w = info["shape"]
+    k = max(1, stamps.HQ_SIDE // max(h, w))
+    return {**info, "survey": survey, "oid": oid, "arcsec_per_px": PIXSCALE[survey], "width": w * k, "height": h * k, "upsample": k,
+            "views": {v: f"/api/dz/alert/{survey}/{oid}/cutout/{v}.png" for v in stamps.VIEWS},
+            "credit": "Vera C. Rubin Observatory alert cutouts via ALeRCE" if survey == "lsst" else "ZTF alert cutouts via ALeRCE"}
+
+
+@router.get("/api/dz/alert/{survey}/{oid}/cutout/{view}.png")
+def alert_cutout_png(survey: str, oid: str, view: str, raw: int = 0):
+    from .config import STAMP_DIR
+    from .detectors import stamps
+    if view not in stamps.VIEWS:
+        raise HTTPException(404, "unknown view")
+    out = STAMP_DIR / "hq" / survey / f"{oid}_{view}_{'raw' if raw else 'smooth'}_{stamps.HQ_VERSION}.png"
+    if not out.exists():
+        img = stamps.render_view(_cutouts(survey, oid), view, bool(raw))
+        out.parent.mkdir(parents=True, exist_ok=True)
+        cv2.imwrite(str(out), img)
+    return FileResponse(out, headers={"Cache-Control": "public, max-age=86400"})
 
 
 @router.get("/api/dz/sky")

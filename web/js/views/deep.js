@@ -161,6 +161,13 @@ export function createDeep(ctx) {
     name: 'deep',
     title: 'Deep Field',
     group,
+    // the most recently observed JWST / Hubble field (from the live feed row)
+    async showLatest() {
+      if (!list.length) await loadList();
+      if (!list.length) return;
+      const t = (im) => Date.parse(im.obs_time || im.fetched_at || 0) || 0;
+      await show(list.reduce((bi, im, i) => (t(im) > t(list[bi]) ? i : bi), 0));
+    },
     get hoverables() { return current ? [current.points] : []; },
     // Where a ray meets the flat image, and how sharp the texture there is (for handing over to deep zoom).
     planeHit(raycaster) {
@@ -243,6 +250,7 @@ export function createDeep(ctx) {
       return true;
     },
     items: () => list.map((im) => ({ label: `${im.source.toUpperCase()} · ${im.target}`, sub: `${im.stats.n_galaxies || 0} galaxies` })),
+    itemDates: () => list.map((im) => (im.obs_time || '').slice(0, 10) || 'unknown'),
     get itemIndex() { return index; },
     selectItem(i) { return show(i); },
     next() { return show(index + 1); },

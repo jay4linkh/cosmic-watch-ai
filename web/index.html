@@ -8,7 +8,7 @@
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><circle cx='32' cy='32' r='10' fill='%2367e8f9'/><ellipse cx='32' cy='32' rx='28' ry='9' fill='none' stroke='%23a78bfa' stroke-width='3' transform='rotate(-20 32 32)'/></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Comic+Neue:wght@400;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/style.css">
   <script type="importmap">
   {
@@ -38,6 +38,7 @@
     </div>
     <nav id="views">
       <button data-view="observatory" class="active">Observatory</button>
+      <button data-view="solar">Solar System</button>
       <button data-view="deep">Deep Field</button>
       <button data-view="bh">Black Holes</button>
       <button data-view="sun">The Sun</button>
@@ -50,6 +51,7 @@
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 11V6a2 2 0 0 0-4 0v5"/><path d="M14 10V4a2 2 0 0 0-4 0v6"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></svg>
         <span>Hand mode</span>
       </button>
+      <button id="music-btn" class="icon-btn" title="Ambient music (M)">♪</button>
       <button id="tour-btn" class="icon-btn" title="Guided tour">?</button>
     </div>
   </header>
@@ -124,6 +126,7 @@
   </div>
   <div id="hud"></div>
   <div id="items"></div>
+  <div id="timeline" class="glass" hidden></div>
   <div id="tip"></div>
   <div id="toasts"></div>
 

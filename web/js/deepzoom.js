@@ -89,13 +89,23 @@ export function createDeepZoom({ onClose, toast }) {
     <div class="dz-top">
       <button class="dz-close">← Back to 3D</button>
       <div class="dz-title"><span class="dz-kicker"></span><b></b></div>
+      <button class="dz-rubinbtn" hidden title="Zoom into the alert's own pixels: tonight, before, and what changed">🔭 Alert pixels</button>
       <button class="dz-restore" hidden title="Original science pixels vs scientific restoration (R)">◐ Original</button>
       <button class="dz-ai" hidden title="Add a super-resolution level past the real pixels (E)">✨ AI enhance: off</button>
       <button class="dz-toggle on" title="Show / hide what the AI found (snap)">AI overlay</button>
     </div>
     <div class="dz-card glass"></div>
     <div class="dz-scale"><div class="dz-res"></div><div class="dz-fov"></div><div class="dz-src"></div><div class="dz-credit"></div></div>
-    <div class="dz-loading">Loading tiles…</div>`;
+    <div class="dz-loading">Loading tiles…</div>
+    <div class="dz-rubin" hidden>
+      <div class="dz-rubin-view"></div>
+      <div class="dz-rubin-bar glass">
+        <button data-v="change">Change</button><button data-v="science">Tonight</button><button data-v="template">Before</button><button data-v="difference">Difference</button>
+        <i></i><button data-a="blink" title="Flip between tonight and before">Blink</button><button data-a="raw" title="Show the real pixel grid, nothing in between">Real pixels</button>
+        <button data-a="close">← Sky survey</button>
+      </div>
+      <div class="dz-rubin-cap glass"></div>
+    </div>`;
   document.body.appendChild(root);
   const $ = (s) => root.querySelector(s);
 
@@ -110,6 +120,69 @@ export function createDeepZoom({ onClose, toast }) {
   $('.dz-toggle').addEventListener('click', () => toggleOverlay());
   $('.dz-ai').addEventListener('click', () => cycleAI());
   $('.dz-restore').addEventListener('click', () => cycleRestore());
+
+  // ---------- the alert's own cutouts, zoomable: tonight / before / change ----------
+  const R_VIEWS = ['change', 'science', 'template', 'difference'];
+  const R_TEXT = {
+    change: '<b>Change composite.</b> Tonight is drawn warm and the earlier reference cool, so light that is <b style="color:#fdba74">new is orange</b>, light that has <b style="color:#7dd3fc">gone is blue</b>, and everything that stayed the same is white.',
+    science: '<b>Tonight.</b> The image the telescope took when it raised this alert.',
+    template: '<b>Before.</b> The reference image of the same patch, built from earlier nights.',
+    difference: '<b>Difference.</b> Tonight minus before: <b style="color:#fcd34d">gold got brighter</b>, <b style="color:#7dd3fc">blue got fainter</b>, black did not change.',
+  };
+  let rv = null, rinfo = null, rView = 'change', rRaw = false, rBlink = null;
+
+  function rubinPaint() {
+    R_VIEWS.forEach((v, i) => rv?.world.getItemAt(i)?.setOpacity(v === rView ? 1 : 0));
+    root.querySelectorAll('.dz-rubin-bar [data-v]').forEach((b) => b.classList.toggle('on', b.dataset.v === rView));
+    root.querySelector('.dz-rubin-bar [data-a="blink"]').classList.toggle('on', !!rBlink);
+    root.querySelector('.dz-rubin-bar [data-a="raw"]').classList.toggle('on', rRaw);
+    if (!rinfo) return;
+    const [h, w] = rinfo.shape, name = rinfo.survey === 'lsst' ? 'Rubin' : 'ZTF';
+    $('.dz-rubin-cap').innerHTML = `<p>${R_TEXT[rView]}</p>
+      <p class="dz-hint">${name} alert cutout · ${w} × ${h} real pixels · 1 pixel = ${rinfo.arcsec_per_px}″ · ${(w * rinfo.arcsec_per_px).toFixed(0)}″ across ·
+      the centre <b>${rinfo.direction}</b> (${Math.abs(rinfo.peak_sigma).toFixed(0)}σ above the noise).
+      ${rRaw ? 'Showing the real pixel grid.' : 'Smoothed between pixels for display only: no detail is added. <b>Real pixels</b> shows exactly what the telescope sent.'}
+      Each panel is stretched to its own noise level.</p>`;
+  }
+  function rubinLoad(keep) {
+    const bounds = keep && rv.world.getItemCount() ? rv.viewport.getBounds() : null;
+    rv.addOnceHandler('open', () => { if (bounds) rv.viewport.fitBounds(bounds, true); rubinPaint(); });
+    rv.open(R_VIEWS.map((v) => ({ tileSource: { type: 'image', url: `${rinfo.views[v]}${rRaw ? '?raw=1' : ''}` }, opacity: v === rView ? 1 : 0 })));
+  }
+  async function openRubin() {
+    if (!spec?.survey || !spec?.oid) return;
+    const my = token, b = $('.dz-rubinbtn');
+    b.textContent = '🔭 fetching the cutouts…';
+    rinfo = await fetch(`/api/dz/alert/${spec.survey}/${spec.oid}/cutout`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    b.textContent = '🔭 Alert pixels';
+    if (my !== token) return;
+    if (!rinfo) { toast?.('The broker has no cutouts for this alert right now', '#fb7185'); return; }
+    $('.dz-rubin').hidden = false;
+    rv ||= OSD({
+      element: $('.dz-rubin-view'), showNavigationControl: false, maxZoomPixelRatio: 3, minZoomImageRatio: 0.45, visibilityRatio: 0.5,
+      animationTime: 0.9, springStiffness: 9, zoomPerScroll: 1.35, gestureSettingsMouse: { clickToZoom: false, dblClickToZoom: true }, crossOriginPolicy: false,
+    });
+    rView = 'change'; rRaw = false;
+    rubinLoad(false);
+  }
+  function closeRubin() {
+    clearInterval(rBlink); rBlink = null;
+    $('.dz-rubin').hidden = true;
+    rv?.close();
+    rinfo = null;
+  }
+  $('.dz-rubinbtn').addEventListener('click', () => openRubin());
+  $('.dz-card').addEventListener('click', (e) => { if (e.target.closest('.dz-stamp')) openRubin(); });
+  $('.dz-rubin-bar').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b || !rinfo) return;
+    if (b.dataset.v) { clearInterval(rBlink); rBlink = null; rView = b.dataset.v; rubinPaint(); }
+    else if (b.dataset.a === 'blink') {
+      if (rBlink) { clearInterval(rBlink); rBlink = null; } else { rView = 'science'; rBlink = setInterval(() => { rView = rView === 'science' ? 'template' : 'science'; rubinPaint(); }, 650); }
+      rubinPaint();
+    } else if (b.dataset.a === 'raw') { rRaw = !rRaw; rubinLoad(true); }
+    else if (b.dataset.a === 'close') closeRubin();
+  });
 
   function ensureViewer() {
     if (viewer) return viewer;
@@ -298,12 +371,41 @@ export function createDeepZoom({ onClose, toast }) {
         <span>Pointing</span><b>az ${Math.round(st.az || 0)}° · el ${Math.round(st.el || 0)}°</b>
       </div>
       <p class="dz-hint">${esc(st.camera_desc || '')}. ${st.greyscale ? 'Black-and-white camera. ' : ''}</p>
+      ${marsFound(st)}
       ${st.caption ? `<div class="dz-know"><div class="dz-card-k">NASA'S CAPTION</div><p>${esc(st.caption)}</p></div>` : ''}
       <p class="dz-hint">Raw image: NASA/JPL-Caltech${st.rover === 'perseverance' ? '/ASU' : '/MSSS'}. Not yet calibrated or colour-corrected.</p>`);
   }
 
+  function marsFound(st) {
+    const rk = st.rocks, ft = st.features || [];
+    if (!rk && !ft.length) return '';
+    const d = rk?.diameter_px;
+    return `<div class="dz-know"><div class="dz-card-k">LOCATED IN THIS IMAGE</div>
+      ${rk?.n_rocks ? `<p><b>${rk.n_rocks}</b> rock candidates (amber outlines), covering <b>${rk.rock_cover_pct}%</b> of the ground.
+        Typical size ${d.median} px, largest ${d.max} px across (image is ${rk.image_width_px} px wide).</p>
+        <p class="dz-hint">Sizes are in pixels: without distance data they cannot be turned into centimetres. Candidates, not a survey:
+        dark smooth rocks and half-buried ones are missed.</p>`
+        : `<p class="dz-hint">Rocks: ${esc(rk?.skipped || 'none found')}.</p>`}
+      ${ft.map((f) => `<p>The CNN keeps seeing <b>${esc(f.cls)}</b> in one area (${Math.round(f.score * 100)}%): ${esc(f.note || '')}.</p>`).join('')}</div>`;
+  }
+
+  // Mars: rock candidates (ellipses) and areas where the scene CNN keeps seeing the same thing (boxes)
+  async function marsOverlays(my) {
+    const det = await fetch(`/api/images/${spec.imageId}/detections?limit=600`).then((r) => r.json()).catch(() => null);
+    if (my !== token || !det?.rows.length) return;
+    const aspect = info.height / info.width;
+    for (const r of det.rows) {
+      const name = det.labels[r[5]], rock = name === 'rock';
+      const a = Math.max(r[2] * (rock ? 1.15 : 1), 0.004), b = Math.max(r[3] * (rock ? 1.15 : 1), 0.004);
+      const box = el('div', rock ? 'dz-ell dz-rock' : 'dz-marsbox');
+      if (rock) { const ring = el('i'); ring.style.cssText = `border-color:#fbbf24;transform:rotate(${r[4]}rad)`; box.appendChild(ring); box.title = 'rock candidate'; }
+      else box.appendChild(el('span', 'dz-ell-tag', `${name.replace('CNN: ', '')} · ${Math.round(r[6] * 100)}%`));
+      addOverlay(box, new OSD.Rect(r[0] - a, r[1] * aspect - b, 2 * a, 2 * b));
+    }
+  }
+
   async function imageOverlays(my) {
-    if (spec.mars) { marsCard(); return; }
+    if (spec.mars) { marsCard(); marsOverlays(my); return; }
     const det = await fetch(`/api/images/${spec.imageId}/detections?limit=3000`).then((r) => r.json());
     if (my !== token) return;
     const aspect = info.height / info.width;
@@ -328,8 +430,53 @@ export function createDeepZoom({ onClose, toast }) {
       <p><b>${n}</b> galaxies outlined · <b>${withCnn}</b> classified by our CNN.</p>
       <div class="dz-legend">${Object.entries(COARSE_COLOR).map(([k, c]) => `<span><i style="border-color:${c}"></i>${k}</span>`).join('')}
       <span><i style="border-color:rgba(230,237,247,0.55)"></i>not classified</span></div>
-      <p class="dz-hint">Click (or point at) any outline and the Cosmic Agent tells you what it really is. Snap / <kbd>O</kbd> hides the overlay.</p>`);
+      <p class="dz-hint">Click (or point at) any outline and the Cosmic Agent tells you what it really is. Snap / <kbd>O</kbd> hides the overlay.</p>
+      <div class="dz-cat">${catalogBlock()}</div>`);
   }
+
+  // ---------- science catalogue: multi-scale detection on the calibrated FITS, with measured completeness ----------
+  const SIZE_ORDER = ['point', 'micro', 'small', 'medium', 'large', 'giant'];
+  function catalogBlock() {
+    const c = info?.catalog;
+    if (!c) return '';
+    if (c.state === 'ready' && c.summary) {
+      const s = c.summary, m = s.mag_50 || {};
+      return `<div class="dz-card-k">SCIENCE CATALOGUE · FROM THE FITS</div>
+        <p><b>${s.n_sources.toLocaleString()}</b> sources measured on the calibrated data: <b>${s.new.toLocaleString()}</b> the preview detector missed,
+        ${s.confirmed_old.toLocaleString()} confirmed${s.unconfirmed_old ? `, ${s.unconfirmed_old.toLocaleString()} old ones not confirmed` : ''}.</p>
+        <div class="dz-facts">${SIZE_ORDER.filter((k) => s.size_classes?.[k]).map((k) => `<span>${k === 'point' ? 'point-like (stars)' : `${k} extended`}</span><b>${s.size_classes[k].toLocaleString()}${m[k] != null ? ` · half found at mag ${m[k].toFixed(1)}` : ''}</b>`).join('')}</div>
+        <p class="dz-hint">Sizes are relative to the image's sharpness (${s.psf_fwhm_arcsec ?? '?'}″). "Half found at" is measured by injecting fake galaxies
+        of that size and counting how many the detector finds again. "Extended" means bigger than a star's image: usually a galaxy, but inside a nearby galaxy it can be a star cluster or gas cloud. Magnitudes are AB${s.mag_range ? `, ${s.mag_range[0].toFixed(1)} to ${s.mag_range[1].toFixed(1)}` : ''}.</p>
+        <a class="btn ghost dz-cat-dl" href="${c.table}" download>⬇ Download the catalogue (ECSV)</a>`;
+    }
+    if (c.state === 'processing') return '<div class="dz-card-k">SCIENCE CATALOGUE</div><p class="dz-hint">Detecting at several scales on the FITS and injecting test galaxies… this takes a few minutes.</p>';
+    if (c.state === 'failed') return `<div class="dz-card-k">SCIENCE CATALOGUE</div><p class="dz-hint">Failed: ${esc(c.error || 'error')}</p><button class="btn ghost dz-cat-go">Try again</button>`;
+    if (c.state === 'available') return `<div class="dz-card-k">SCIENCE CATALOGUE</div>
+      <p class="dz-hint">These outlines come from the compressed preview. The calibrated FITS is here: detect on it at several scales (tiny to giant galaxies) with real magnitudes.</p>
+      <button class="btn dz-cat-go">Build the science catalogue</button>`;
+    return '<div class="dz-card-k">SCIENCE CATALOGUE</div><p class="dz-hint">Available once the science FITS has been fetched (it downloads when you open this image).</p>';
+  }
+  let catTimer = null;
+  async function buildCatalog() {
+    const my = token, id = spec?.imageId;
+    if (id == null) return;
+    clearTimeout(catTimer);
+    const st = await fetch(`/api/dz/image/${id}/catalog`, { method: 'POST' }).then((r) => r.json()).catch(() => null);
+    if (my !== token || !st) return;
+    if (st.state === 'ready') {
+      info = await fetch(`/api/dz/image/${id}`).then((r) => r.json());
+      if (my !== token) return;
+      clearOverlays();
+      await imageOverlays(my);
+      toast?.('Science catalogue ready: outlines now come from the calibrated data', '#4ade80');
+      return;
+    }
+    info.catalog = st;
+    const box = $('.dz-cat');
+    if (box) box.innerHTML = catalogBlock();
+    if (st.state === 'processing') catTimer = setTimeout(buildCatalog, 6000);
+  }
+  $('.dz-card').addEventListener('click', (e) => { if (e.target.closest('.dz-cat-go')) buildCatalog(); });
 
   // Click an outline: fly to it and let the Cosmic Agent explain what it really is.
   async function focusDetection(r, det, cnn, el) {
@@ -425,9 +572,9 @@ export function createDeepZoom({ onClose, toast }) {
     }
     const others = info.alerts.length - 1;
     if (!spec.gcn) card(`<div class="dz-card-k">${spec.cls} · ${spec.survey === 'lsst' ? 'RUBIN' : 'ZTF'} ALERT</div>
-      ${spec.stamp ? `<img class="dz-stamp" src="${spec.stamp}" alt="alert cut-outs">
+      ${spec.stamp ? `<img class="dz-stamp" src="${spec.stamp}" alt="alert cut-outs" title="Click to zoom into these pixels">
       <div class="dz-stamp-k"><span>tonight</span><span>before</span><span>change</span></div>` : ''}
-      <p>The tiny cut-out is everything the alert contains. Behind it: the same patch of sky, deep and sharp,
+      <p>The tiny cut-out is everything the alert contains: <b>click it</b> to zoom into its pixels. Behind it: the same patch of sky, deep and sharp,
       from the <b>${info.layer.toUpperCase()}</b> survey (taken years earlier, before this event).</p>
       <div class="dz-host">Looking for the host galaxy…</div>
       <div class="dz-ctx"><p class="dz-hint">Loading the light curve and asking SIMBAD, Gaia and NED (first time can take a minute)…</p></div>
@@ -498,6 +645,8 @@ export function createDeepZoom({ onClose, toast }) {
     clearTimeout(restoreTimer);
     $('.dz-ai').hidden = true;
     $('.dz-restore').hidden = true;
+    closeRubin();
+    $('.dz-rubinbtn').hidden = !(s.kind === 'sky' && s.survey && s.oid && !s.gcn);
     root.classList.add('open');
     document.body.classList.add('deepzoom');
     $('.dz-kicker').textContent = s.kicker || '';
@@ -550,6 +699,7 @@ export function createDeepZoom({ onClose, toast }) {
     root.classList.remove('open');
     document.body.classList.remove('deepzoom');
     clearOverlays();
+    closeRubin();
     viewer?.close();
     spec = info = null;
     onClose?.();

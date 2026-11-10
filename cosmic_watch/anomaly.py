@@ -417,7 +417,9 @@ def run_mars(con) -> int:
 
 
 def run_learn(con) -> int:
-    """The agent asks you to teach it when it has a backlog of genuinely hard cases."""
+    """Retired: the agent no longer asks to be taught. It learns from archive labels (xsurvey) on its own;
+    the teach panel is still there (T) for anyone who wants to label by hand."""
+    return 0
     from .ml import active
     q = active.queue(con, 30)
     hard = [c for c in q if c["score"] >= 0.75]

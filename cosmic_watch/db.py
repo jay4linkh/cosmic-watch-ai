@@ -175,7 +175,10 @@ def connect() -> sqlite3.Connection:
     con.executescript(SCHEMA)
     dcols = {r[1] for r in con.execute("PRAGMA table_info(detections)")}
     for col, typ in (("cnn_label", "TEXT"), ("cnn_conf", "REAL"), ("cnn_probs", "TEXT"),   # galaxy CNN output
-                     ("ra", "REAL"), ("dec", "REAL")):                                       # sky position (from the WCS)
+                     ("ra", "REAL"), ("dec", "REAL"),                                        # sky position (from the WCS)
+                     ("mag", "REAL"), ("mag_err", "REAL"), ("snr", "REAL"), ("r50_arcsec", "REAL"),   # science catalogue (FITS)
+                     ("size_class", "TEXT"), ("det_mode", "TEXT"),
+                     ("origin", "TEXT")):                                                     # NULL = preview detector, 'science' = FITS detector
         if col not in dcols:
             con.execute(f"ALTER TABLE detections ADD COLUMN {col} {typ}")
     cols = {r[1] for r in con.execute("PRAGMA table_info(alerts)")}

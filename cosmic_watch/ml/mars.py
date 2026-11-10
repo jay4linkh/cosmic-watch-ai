@@ -107,3 +107,17 @@ def analyse(path):
         top = classify(rgb)
         out.update(scene=top[0][0], scene_conf=top[0][1], scene_top=top, scene_note=NOTES.get(top[0][0]))
     return out
+
+
+def analyse_full(path):
+    """analyse() plus located features: (stats, detections in the analysed frame's pixels)."""
+    from . import mars_features
+    out = analyse(path)
+    if out is None:
+        return None, []
+    bgr = cv2.imread(str(path), cv2.IMREAD_COLOR)
+    if (bgr.shape[1], bgr.shape[0]) != tuple(out["size"]):
+        bgr = cv2.resize(bgr, tuple(out["size"]), interpolation=cv2.INTER_AREA)
+    dets, st = mars_features.find(bgr, out.get("scene"))
+    out.update(st)
+    return out, dets

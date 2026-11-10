@@ -32,10 +32,14 @@ def run_sdo(con) -> int:
         if db.image_exists(con, rec["source"], rec["external_id"]):
             continue
         if rec["mode"] == "sunspots":
-            img, regs, stats = sun.sunspots(rec["path"])
+            try:                                   # NOAA's numbered regions for the same day, to check our groups against
+                noaa = spaceweather._regions()
+            except Exception:  # noqa: BLE001
+                noaa = None
+            img, regs, stats = sun.sunspots(rec["path"], rec["obs_time"], noaa)
         else:
             n_sigma = 5.0 if rec["filter"] in ("0304", "0131", "0094") else 3.0
-            img, regs, stats = sun.active_regions(rec["path"], n_sigma=n_sigma)
+            img, regs, stats = sun.active_regions(rec["path"], n_sigma=n_sigma, when=rec["obs_time"], holes=rec["filter"] == "0193")
         out = sun.annotate(img, regs, _annotated_path(rec["path"]))
         db.insert_image(con, rec, out, stats, regs)
         log.info("SDO %s: %s", rec["filter"], stats)
@@ -146,12 +150,13 @@ def run_mars(con) -> int:
     n = 0
     for rec in mars.fetch(lambda src, oid: db.image_exists(con, src, oid)):
         try:
-            stats = mars_cv.analyse(rec["path"]) or {}
+            stats, dets = mars_cv.analyse_full(rec["path"])
+            stats = stats or {}
         except Exception as e:              # CV is an extra; keep the image
             log.warning("Mars CV failed on %s: %s", rec["external_id"], e)
-            stats = {}
+            stats, dets = {}, []
         stats.update(rec["meta"])
-        db.insert_image(con, rec, None, stats, [])
+        db.insert_image(con, rec, None, stats, dets)
         log.info("Mars %s: %s", rec["title"], stats.get("scene", "-"))
         n += 1
     return n

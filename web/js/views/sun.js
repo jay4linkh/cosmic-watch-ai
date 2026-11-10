@@ -149,7 +149,7 @@ export function createSun(ctx) {
       const rr = dx * dx + dy * dy;
       if (rr >= 0.98) return;
       const n = new THREE.Vector3(dx, dy, Math.sqrt(1 - rr));
-      const color = d.label === 'sunspot' ? 0x7dd3fc : 0x86efac;
+      const color = d.label === 'sunspot' ? 0x7dd3fc : d.label === 'coronal hole' ? 0xfbbf24 : 0x86efac;
       const size = Math.max(0.6, Math.sqrt((d.a || 4) * (d.b || 4)) / rpx * R * 1.1);
       const ring = new THREE.Mesh(new THREE.RingGeometry(size, size + 0.12, 48),
         new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
@@ -161,8 +161,8 @@ export function createSun(ctx) {
       const loopGeom = new THREE.BufferGeometry().setFromPoints(new Array(40).fill(0).map(() => new THREE.Vector3()));
       const loop = new THREE.Line(loopGeom, new THREE.LineBasicMaterial({ color: info.glow, transparent: true, opacity: 0 }));
       root.add(loop);
-      const tag = label(`<span class="callout-k">${String(k + 1).padStart(2, '0')}</span>${d.label === 'sunspot' ? 'Sunspot' : 'Active region'}`, 'callout');
-      tag.element.style.setProperty('--c', d.label === 'sunspot' ? '#7dd3fc' : '#86efac');
+      const tag = label(`<span class="callout-k">${String(k + 1).padStart(2, '0')}</span>${d.label === 'sunspot' ? 'Sunspot' : d.label === 'coronal hole' ? 'Coronal hole' : 'Active region'}`, 'callout');
+      tag.element.style.setProperty('--c', d.label === 'sunspot' ? '#7dd3fc' : d.label === 'coronal hole' ? '#fbbf24' : '#86efac');
       root.add(tag);
       regions.push({ n, t, size, ring, loop, tag, d, k });
     });
@@ -260,7 +260,7 @@ export function createSun(ctx) {
     hover(obj) {
       const r = cur?.regions.find((x) => x.ring === obj);
       if (!r) return null;
-      return `<b>${r.d.label === 'sunspot' ? 'Sunspot' : 'Active region'} #${r.k + 1}</b><br><span>area ${fmt(Math.round(4 * r.d.a * r.d.b))} px² · brightness ${r.d.score?.toFixed(2)}</span>`;
+      return `<b>${r.d.label === 'sunspot' ? 'Sunspot' : r.d.label === 'coronal hole' ? 'Coronal hole' : 'Active region'} #${r.k + 1}</b><br><span>area ${fmt(Math.round(4 * r.d.a * r.d.b))} px² · brightness ${r.d.score?.toFixed(2)}</span>`;
     },
     pick() {},
     async focusOn(channel, x, y) {
@@ -282,13 +282,25 @@ export function createSun(ctx) {
     info() {
       if (!cur) return { kicker: 'SDO', title: 'Loading…', sub: '', stats: [] };
       const s = cur.ch.stats, c = CHANNEL[cur.ch.filter] || {};
-      const stats = 'n_sunspots' in s
-        ? [['Sunspots', fmt(s.n_sunspots)], ['Spot area', `${fmt(s.spot_area_px)} px`]]
-        : [['Active regions', fmt(s.n_active_regions)], ['Activity index', `${s.activity_index}% of disk`]];
+      let stats, extra = '';
+      if ('n_sunspots' in s) {
+        stats = s.sunspot_number != null
+          ? [['Sunspot number', fmt(s.sunspot_number)], ['Groups · spots', `${s.n_groups} · ${s.n_sunspots}`], ['Spot area', `${fmt(Math.round(s.spot_area_msh))} MSH`],
+             ['NOAA regions found', s.noaa ? `${s.noaa.noaa_recovered} of ${s.noaa.noaa_visible_with_spots}` : '—']]
+          : [['Sunspots', fmt(s.n_sunspots)], ['Spot area', `${fmt(s.spot_area_px)} px`]];
+        const g = (s.groups || []).slice(0, 4).map((x) => `${x.noaa ? `AR ${x.noaa}` : 'unnumbered'} at ${x.location} (${x.n_spots} spot${x.n_spots > 1 ? 's' : ''})`).join(', ');
+        if (g) extra = ` Groups: ${g}.${s.noaa?.median_offset_deg != null ? ` Our positions are ${s.noaa.median_offset_deg}° from NOAA's on average.` : ''}`;
+      } else {
+        stats = [['Active regions', fmt(s.n_active_regions)], ['Activity index', `${s.activity_index}% of disk`]];
+        if (s.n_coronal_holes != null) {
+          stats.push(['Coronal holes', fmt(s.n_coronal_holes)], ['Hole area', `${s.coronal_hole_area_pct}% of disk`]);
+          if (s.earth_facing_hole) extra = ' A coronal hole is facing Earth: its fast solar wind usually arrives in 2 to 4 days.';
+        }
+      }
       return {
         kicker: `NASA SDO · ${c.name || cur.ch.filter}`,
         title: 'The Sun, right now',
-        sub: `${c.desc || ''}. Taken ${cur.ch.obs_time?.slice(11, 16)} UTC (${timeAgo(cur.ch.obs_time)}). Open your hand to raise the magnetic loops.`,
+        sub: `${c.desc || ''}. Taken ${cur.ch.obs_time?.slice(11, 16)} UTC (${timeAgo(cur.ch.obs_time)}). Open your hand to raise the magnetic loops.${extra}`,
         stats,
       };
     },

@@ -134,6 +134,12 @@ export function createMars(ctx) {
     },
     unhover() { hovered = null; },
     pick(obj) { const im = obj.userData.image; if (im) this.openImage(im.id); },
+    async showLatest() {
+      if (!images.length) await this.load();
+      const t = (im) => Date.parse(im.obs_time || 0) || 0;
+      const im = images.reduce((b, x) => (!b || t(x) > t(b) ? x : b), null);
+      if (im) return this.openImage(im.id);
+    },
     async openImage(id) {
       if (!images.length) await this.load();
       const im = images.find((x) => x.id === Number(id));

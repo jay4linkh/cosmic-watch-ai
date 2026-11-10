@@ -13,6 +13,8 @@ import { createSun } from './views/sun.js';
 import { createBlackHoles } from './views/blackholes.js';
 import { createMars } from './views/mars.js';
 import { createNeo } from './views/neo.js';
+import { createSolar } from './views/solar.js';
+import { createMusic } from './music.js';
 import { createInspector } from './inspect.js';
 import { createDeepZoom } from './deepzoom.js';
 import { createTeacher } from './teach.js';
@@ -67,10 +69,13 @@ let hands = null;
 
 const ctx = {
   camera,
+  controls,
+  bloom,
   get handMode() { return state.handMode; },
   goTo: (v) => switchView(v),
   inspect: (t) => openInspect(t),
   flyTo: (home, ms) => flyTo(home, ms),
+  stopFlight: () => { flight = null; },
   onInfoChange: () => { renderInfo(); renderItems(); },
   showDetail(html) { $('#detail-body').innerHTML = html; $('#detail').classList.add('open'); },
   openDeepZoom: (spec) => dz.open(spec),
@@ -87,6 +92,7 @@ const views = {
   sun: createSun(ctx),
   mars: createMars(ctx),
   neo: createNeo(ctx),
+  solar: createSolar(ctx),
 };
 // Only the active view's group is in the scene. (CSS2DRenderer ignores parent visibility,
 // so a merely hidden group would still draw its labels.)
@@ -221,7 +227,7 @@ async function switchView(name) {
   if (next === current) return;
   $('#fade').style.opacity = 1;
   await new Promise((r) => setTimeout(r, 260));
-  if (current) { scene.remove(current.group); hideLabels(current.group); current.unhover?.(); }
+  if (current) { scene.remove(current.group); hideLabels(current.group); current.unhover?.(); current.leave?.(); }
   current = next;
   document.querySelectorAll('#views button').forEach((b) => b.classList.toggle('active', b.dataset.view === name));
   $('#detail').classList.remove('open');
@@ -237,6 +243,8 @@ async function switchView(name) {
   renderInfo();
   renderItems();
   $('#fade').style.opacity = 0;
+  agentState.current = null;            // the agent now talks about this world
+  agentNext();
 }
 
 function renderInfo() {
@@ -337,12 +345,68 @@ $('#classify').addEventListener('click', async (e) => {
   renderClassify();
 });
 
+// The picker at the bottom of every world is a glider: a highlight that slides to what you choose.
+// Dated images (Deep Field) get two rows: the days, with how many images arrived on each, then that day's images.
+const glPrev = {};
+function glide(row, key) {
+  const act = row.querySelector('.active'), hi = row.querySelector('.gl-hi');
+  if (!hi) return;
+  if (!act) { hi.style.opacity = 0; return; }
+  const to = { x: act.offsetLeft, w: act.offsetWidth }, from = glPrev[key] || to;
+  hi.style.opacity = 1;
+  hi.style.transition = 'none';
+  hi.style.transform = `translateX(${from.x}px)`;
+  hi.style.width = `${from.w}px`;
+  hi.getBoundingClientRect();                              // start from where the highlight was, then let it glide
+  hi.style.transition = '';
+  hi.style.transform = `translateX(${to.x}px)`;
+  hi.style.width = `${to.w}px`;
+  glPrev[key] = to;
+  row.scrollTo({ left: to.x - (row.clientWidth - to.w) / 2, behavior: 'smooth' });
+}
+let tlOrder = [];
+const niceDay = (d) => (d === 'unknown' ? 'no date' : new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }));
+function renderTimeline(src, items, dates) {
+  const tl = $('#timeline');
+  tlOrder = items.map((_, i) => i).sort((a, b) => (dates[a] || '').localeCompare(dates[b] || '') || b - a);
+  const pos = Math.max(0, tlOrder.indexOf(src.itemIndex)), days = [];
+  tlOrder.forEach((i, p) => { const d = dates[i] || 'unknown', last = days[days.length - 1]; if (last?.d === d) last.n++; else days.push({ d, n: 1, start: p }); });
+  const day = dates[tlOrder[pos]] || 'unknown', dd = days.find((x) => x.d === day), it = items[tlOrder[pos]];
+  tl.hidden = false;
+  tl.innerHTML = `<div class="tl-head"><button data-step="-1" title="Older (←)">‹</button>
+      <div class="tl-now"><b>${it.label}</b><span>${niceDay(day)} · image ${pos - dd.start + 1} of ${dd.n} that day${it.sub ? ` · ${it.sub}` : ''}</span></div>
+      <button data-step="1" title="Newer (→)">›</button></div>
+    <div class="gl-row tl-days"><i class="gl-hi"></i>${days.map((x) => `<button data-pos="${x.start}" class="${x.d === day ? 'active' : ''}" title="${x.n} image${x.n > 1 ? 's' : ''} on ${niceDay(x.d)}">${niceDay(x.d)}<small>${x.n}</small></button>`).join('')}</div>
+    <div class="gl-row tl-imgs"><i class="gl-hi"></i>${tlOrder.slice(dd.start, dd.start + dd.n).map((i, k) => `<button data-pos="${dd.start + k}" class="${dd.start + k === pos ? 'active' : ''}">${items[i].label}<small>${items[i].sub ?? ''}</small></button>`).join('')}</div>
+    <div class="tl-foot">${items.length} images over ${days.length} day${days.length > 1 ? 's' : ''} · pick a day, then an image · the number is how many arrived that day</div>`;
+  glide(tl.querySelector('.tl-days'), `${src.name}:days`);
+  glPrev[`${src.name}:imgs`] = glPrev[`${src.name}:imgsDay`] === day ? glPrev[`${src.name}:imgs`] : null;     // a new day starts a new row
+  glPrev[`${src.name}:imgsDay`] = day;
+  glide(tl.querySelector('.tl-imgs'), `${src.name}:imgs`);
+}
+async function timelineGo(pos) {
+  pos = Math.max(0, Math.min(tlOrder.length - 1, pos));
+  await current.selectItem(tlOrder[pos]);
+  renderItems();
+  renderInfo();
+}
+$('#timeline').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.pos != null) timelineGo(+b.dataset.pos);
+  else timelineGo(tlOrder.indexOf(current.itemIndex) + +b.dataset.step);
+});
+
 function renderItems() {
   const box = $('#items');
   const src = state.inspecting ? inspector : current;
   const items = src?.items() || [];
-  box.innerHTML = items.map((it, i) => `<button data-i="${i}" class="${i === src.itemIndex ? 'active' : ''}">${it.label}<small>${it.sub ?? ''}</small></button>`).join('');
-  box.querySelector('.active')?.scrollIntoView({ block: 'nearest', inline: 'center' });
+  const dates = !state.inspecting && src?.itemDates?.();
+  document.body.classList.toggle('has-tl', !!(dates && items.length > 1));
+  if (dates && items.length > 1) { box.innerHTML = ''; renderTimeline(src, items, dates); return; }
+  $('#timeline').hidden = true;
+  box.innerHTML = items.length ? `<i class="gl-hi"></i>${items.map((it, i) => `<button data-i="${i}" class="${i === src.itemIndex ? 'active' : ''}">${it.label}<small>${it.sub ?? ''}</small></button>`).join('')}` : '';
+  if (items.length) glide(box, `${state.inspecting ? 'inspect' : src.name}:items`);
 }
 $('#items').addEventListener('click', async (e) => {
   const b = e.target.closest('button');
@@ -431,7 +495,7 @@ function zoomCamera(f) {
   camera.position.copy(controls.target).add(off.setLength(len));
 }
 
-const VIEW_ORDER = ['observatory', 'deep', 'bh', 'sun', 'mars', 'neo'];
+const VIEW_ORDER = ['observatory', 'solar', 'deep', 'bh', 'sun', 'mars', 'neo'];
 async function toggleHandMode() {
   if (state.handMode) {
     hands?.stop();
@@ -512,6 +576,14 @@ function handHoverDom(x, y) {
   el?.classList.add('hand-hover');
 }
 $('#hand-btn').addEventListener('click', toggleHandMode);
+const music = createMusic();
+function toggleMusic() {
+  const track = music.next();          // off -> Drift -> Aurora -> Abyss -> off
+  $('#music-btn').classList.toggle('on', !!track);
+  $('#music-btn').title = track ? `Playing: ${track.name} · click for the next track (M)` : 'Ambient music: 3 tracks (M)';
+  toast(track ? `♪ ${track.name} · ${track.mood} · generated live, never repeats` : 'Music off', '#a78bfa');
+}
+$('#music-btn').addEventListener('click', toggleMusic);
 $('#sens').addEventListener('change', (e) => hands?.setSensitivity(e.target.value));
 function resizeHands() { const c = $('#hands'); c.width = innerWidth; c.height = innerHeight; }
 
@@ -534,12 +606,24 @@ async function refreshSummary() {
   }
 }
 
+// feed row -> the view that shows it; views with showLatest() also jump to the newest image
+const SOURCE_VIEW = { alerts: 'bh', gw: 'bh', gcn: 'bh', xsurvey: 'bh', sdo: 'sun', spacewx: 'sun', mast: 'deep', learn: 'deep', mars: 'mars', neo: 'neo' };
+
 function renderSources(s) {
   $('#sources').innerHTML = s.sources.map((x) => {
     const when = x.state === 'running' ? 'fetching now' : x.last_ok ? timeAgo(x.last_ok) : 'never';
-    return `<div class="src ${x.state}" title="${x.message || ''}"><span><i></i>${x.name}</span><em>${when} · /${x.interval_min}m</em></div>`;
+    const go = SOURCE_VIEW[x.key];
+    return `<div class="src ${x.state}${go ? ' go' : ''}" data-key="${x.key}" title="${go ? 'Open · ' : ''}${x.message || ''}"><span><i></i>${x.name}</span><em>${when} · /${x.interval_min}m</em></div>`;
   }).join('');
 }
+
+$('#sources').addEventListener('click', async (e) => {
+  const key = e.target.closest('.src.go')?.dataset.key;
+  const name = SOURCE_VIEW[key];
+  if (!name) return;
+  await switchView(name);
+  if (key === 'mast' || key === 'mars') views[name].showLatest?.().catch(() => {});
+});
 
 async function refreshEvents() {
   let ev;
@@ -588,19 +672,61 @@ function typeOut(el, text) {
   }, 16);
 }
 
+// In a world, the agent only talks about that world; on the overview it draws from everything.
+const AGENT_VIEW = { deep: 'deep', bh: 'bh', sun: 'sun', mars: 'mars', neo: 'neo' };
+const AGENT_PLACE = { deep: 'Deep Field', bh: 'Black Holes', sun: 'the Sun', mars: 'Mars', neo: 'Near Earth', solar: 'the Solar System', observatory: 'all feeds' };
+const GUIDE = {
+  deep: ['Scroll into the picture and it hands over to deep zoom: real telescope pixels, no smearing.',
+         'Press R in deep zoom to remove the sky background. Nothing is invented; faint galaxies just stand out.',
+         'In deep zoom, "Build the science catalogue" measures every source on the calibrated data, with real magnitudes.',
+         'Click any outline and I tell you what the archives already know about that exact spot of sky.'],
+  bh: ['Each card is a real alert cut-out. Open one, then "Alert pixels" shows what changed: new light is orange.',
+       'Use Blink in the alert viewer to flip between tonight and before. Your eye catches changes instantly.',
+       'A tidal disruption event is a star torn apart by a black hole. They sit right on a galaxy\'s core.'],
+  sun: ['In visible light, look for sunspot groups. I number them and check them against NOAA\'s regions.',
+        'Switch to 193 Å: dark patches are coronal holes. One facing Earth means fast solar wind in 2 to 4 days.',
+        'Open your hand (or drag the slider) to raise the magnetic loops above the active regions.'],
+  mars: ['Every card is one of the newest raw rover images. Click one to zoom into the real pixels.',
+         'Layered rock was laid down over time, often in water. Light veins are minerals left by water in cracks.',
+         'Navigation cameras are black and white; the mast cameras see colour.'],
+  neo: ['The ring is the Moon\'s orbit. Pink asteroids pass inside it.',
+        'The ISS marker is its real position right now, updated every 5 seconds.',
+        'Orange marks on the globe are fireballs: meteors that exploded in the atmosphere.'],
+  solar: ['Click any planet to ride along with it, then scroll in close.',
+          'Run time at a month per second to watch the inner planets lap the outer ones.',
+          'Follow Saturn and look for the planet\'s shadow falling across its rings.',
+          'Switch to True distances to feel how empty the outer solar system is.'],
+};
+let guideI = 0;
+
+function agentGuide(box, place) {
+  const tips = GUIDE[current?.name];
+  if (!tips) { agentState.current = null; box.hidden = true; return; }
+  agentState.current = { guide: true };
+  box.hidden = false;
+  $('#agent-look').hidden = true;
+  $('#agent-skip').textContent = 'Next tip';
+  $('#agent-title').textContent = `Guide · ${place[0].toUpperCase()}${place.slice(1)}`;
+  typeOut($('#agent-msg'), tips[guideI++ % tips.length]);
+  $('#agent-hyp').innerHTML = '';
+  $('#agent-why').textContent = 'Nothing unusual here right now, so here is something worth trying.';
+}
+
 async function agentNext() {
   const box = $('#agent');
   box.classList.add('thinking');
   try {
-    const r = await api(`/api/agent/suggestion?exclude=${[...agentState.shown].join(',')}`);
-    const s = r.suggestion;
-    const kinds = Object.values(r.stats.interest || {});
-    $('#agent-sub').textContent = `${r.stats.new} anomalies waiting · ${kinds.length ? 'learning your taste' : 'learning'}`;
-    if (!s) { agentState.current = null; box.hidden = true; return; }
+    const view = AGENT_VIEW[current?.name] || '', place = AGENT_PLACE[current?.name] || 'all feeds';
+    const r = await api(`/api/agent/suggestion?exclude=${[...agentState.shown].join(',')}&view=${view}`);
+    const s = current?.name === 'solar' ? null : r.suggestion;
+    $('#agent-sub').textContent = s ? `${s.pending} thing${s.pending === 1 ? '' : 's'} to look at in ${place}` : `guiding you through ${place}`;
+    if (!s) { agentGuide(box, place); return; }
     if (agentState.current?.id === s.id) return;
     agentState.current = s;
     agentState.shown.add(s.id);
     box.hidden = false;
+    $('#agent-look').hidden = false;
+    $('#agent-skip').textContent = 'Not now';
     $('#agent-title').textContent = s.title;
     typeOut($('#agent-msg'), s.message);
     $('#agent-hyp').innerHTML = (s.hypotheses || []).map((h) => `<span>${h}</span>`).join('');
@@ -610,7 +736,7 @@ async function agentNext() {
 
 async function agentFeedback(action) {
   const s = agentState.current;
-  if (!s) return;
+  if (!s || s.guide) return;
   try {
     await fetch('/api/agent/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: s.id, action }) });
   } catch {}
@@ -638,7 +764,7 @@ async function agentLook() {
 }
 
 $('#agent-look').addEventListener('click', agentLook);
-$('#agent-skip').addEventListener('click', async () => { await agentFeedback('dismiss'); agentState.current = null; agentNext(); });
+$('#agent-skip').addEventListener('click', async () => { if (!agentState.current?.guide) await agentFeedback('dismiss'); agentState.current = null; agentNext(); });
 $('#agent-min').addEventListener('click', () => {
   const a = $('#agent');
   a.classList.toggle('min');
@@ -658,10 +784,11 @@ addEventListener('keydown', async (e) => {
   if (e.target?.matches?.('input, select')) return;
   if (['1', '2', '3', '4', '5', '6'].includes(e.key)) switchView(VIEW_ORDER[+e.key - 1]);
   else if (e.key === 'h' || e.key === 'H') toggleHandMode();
+  else if ((e.key === 'm' || e.key === 'M') && !dz.isOpen) toggleMusic();
   else if (e.key === ' ') { e.preventDefault(); setExplodeTarget(state.target > 0.5 ? 0 : 1); }
   else if (state.inspecting && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { await inspector.next(e.key === 'ArrowRight' ? 1 : -1); renderInfo(); renderItems(); }
   else if (e.key === 'ArrowRight' && current?.next) { await current.next(); renderItems(); }
-  else if (e.key === 'ArrowLeft' && current?.selectItem) { await current.selectItem(current.itemIndex - 1); renderItems(); }
+  else if (e.key === 'ArrowLeft' && current?.selectItem) { const n = current.items().length; await current.selectItem((current.itemIndex - 1 + n) % n); renderItems(); }
   else if ((e.key === 'z' || e.key === 'Z') && state.inspecting && !dz.isOpen) openDeep();
   else if ((e.key === 'o' || e.key === 'O') && dz.isOpen) dz.toggleOverlay();
   else if ((e.key === 't' || e.key === 'T') && !dz.isOpen && !state.inspecting) teacher.open();
