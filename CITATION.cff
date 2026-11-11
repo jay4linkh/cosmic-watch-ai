@@ -1,0 +1,17 @@
+cff-version: 1.2.0
+message: "If you use Cosmic Watch, please cite it as below."
+title: "Cosmic Watch: a live, explorable observatory that applies computer vision and machine learning to public astronomy data streams"
+type: software
+authors:
+  - family-names: Gupta
+    given-names: Jay
+    orcid: "https://orcid.org/0009-0002-7127-6146"
+    affiliation: "SVKM's NMIMS Mukesh Patel School of Technology Management & Engineering, Mumbai, India"
+repository-code: "https://github.com/jay4linkh/cosmic-watch-ai"
+license: MIT
+keywords:
+  - astronomy
+  - computer vision
+  - deep learning
+  - time-domain astronomy
+  - galaxy morphology

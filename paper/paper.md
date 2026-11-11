@@ -11,7 +11,7 @@ tags:
   - Mars
 authors:
   - name: Jay Gupta
-    orcid: 0000-0000-0000-0000
+    orcid: 0009-0002-7127-6146
     affiliation: 1
 affiliations:
   - name: SVKM's NMIMS Mukesh Patel School of Technology Management & Engineering, Mumbai, India
