@@ -9,3 +9,6 @@ venv/
 *.part
 runs/
 .claude/
+
+# demo videos (too large for GitHub)
+media/

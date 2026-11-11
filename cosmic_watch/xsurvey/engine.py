@@ -17,6 +17,7 @@ import math
 import time
 
 from . import catalogs, coverage, photometry
+from .. import vetting
 from .match import best, match, sep_arcsec
 
 log = logging.getLogger("cosmic_watch")
@@ -41,6 +42,7 @@ class Report:
     def __init__(self, target):
         self.target = target
         self.evidence, self.history, self.matches, self.flags, self.asteroids = [], [], {}, [], []
+        self.moving_ruled_out = False       # True only after a successful JPL check found nothing nearby
 
     def claim(self, claim_type, statement, source=None, confidence=None, **data):
         self.evidence.append({"claim_type": claim_type, "statement": statement, "source": source,
@@ -284,7 +286,12 @@ def _verdict_transient(rep, ident, host):
                    if (rep.matches.get(n) or {}).get("status") == "covered" and coverage.should_have_seen(n, "r", mag_now)]
     nothing = not any((rep.matches.get(n) or {}).get("best") for n in POS_CATALOGS)
     if nothing and not host:
-        if deep_enough:
+        new_ok, new_why = vetting.hostless_ok(t.get("survey"), t.get("oid"), t.get("n_det"), t.get("classifier_cls"),
+                                              rep.moving_ruled_out)
+        if deep_enough and not new_ok:
+            cands.append(("new_transient_unconfirmed", 0.45,
+                          f"Nothing in the archives here, but it cannot yet be called a new transient: {new_why}."))
+        elif deep_enough:
             names = ", ".join(coverage.SURVEYS[n].label for n in deep_enough)
             cands.append(("new_hostless_transient", min(0.9, 0.5 + 0.15 * len(deep_enough)),
                           f"Nothing was ever seen here although {names} covered this position deeply enough to detect a "
@@ -368,6 +375,7 @@ def _moving(rep, host):
             rep.claim("catalog_fact", f"JPL ephemeris: {b['name']} predicted {b['sep']:.1f}\" away at the alert time (V ≈ {b['V']}).",
                       "jpl_sbident", None, name=b["name"])
     else:
+        rep.moving_ruled_out = True
         rep.claim("catalog_fact", f"No known asteroid or comet within {lim:.0f}\" at the alert time (JPL ephemerides).", "jpl_sbident")
 
 

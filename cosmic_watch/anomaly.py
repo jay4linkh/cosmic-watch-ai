@@ -25,7 +25,7 @@ import cv2
 import numpy as np
 from sklearn.ensemble import IsolationForest
 
-from . import db
+from . import db, vetting
 from .config import ROOT
 
 log = logging.getLogger("cosmic_watch")
@@ -176,9 +176,13 @@ def run_sun(con) -> int:
 FEATURES = ("log brightness", "log size", "ellipticity", "size vs PSF")
 
 
-def deep_outliers(con, image_id: int):
+def deep_outliers(con, image_id: int, limit: int = None):
     img = con.execute("SELECT * FROM images WHERE id=?", (image_id,)).fetchone()
-    dets = con.execute("SELECT id, label, x, y, a, b, theta, score FROM detections WHERE image_id=?", (image_id,)).fetchall()
+    dets = con.execute("SELECT id, label, x, y, a, b, theta, score, cnn_label FROM detections WHERE image_id=?",
+                       (image_id,)).fetchall()
+    # "Normal" is defined among extended sources only: with stars in the population the brightest stars
+    # always looked strangest (the Nov 2026 audit: 58 % of outliers were stars or non-galaxies).
+    dets = vetting.deep_population(dets)
     if not img or len(dets) < 40:           # too few sources to say what "normal" is
         return []
     stats = json.loads(img["stats"] or "{}")
@@ -191,11 +195,8 @@ def deep_outliers(con, image_id: int):
     order = np.argsort(s)[::-1]
     mu, sd = X.mean(0), X.std(0) + 1e-6
     out = []
-    # Rank by isolation score but skip saturated stars and tiny noise blips.
     for i in order:
         d = dets[i]
-        if d["label"] == "star" and X[i, 3] < 3:
-            continue
         zf = (X[i] - mu) / sd
         top = np.argsort(-np.abs(zf))[:2]
         why = " and ".join(f"{'unusually high' if zf[k] > 0 else 'unusually low'} {FEATURES[k]} ({zf[k]:+.1f}σ)" for k in top)
@@ -216,7 +217,7 @@ def deep_outliers(con, image_id: int):
             "ref": {"view": "deep", "image_id": image_id, "u": round(d["x"] / w, 5), "v": round(d["y"] / h, 5),
                     "det_id": d["id"]},
         })
-        if len(out) >= DEEP_PER_IMAGE:
+        if len(out) >= (limit or DEEP_PER_IMAGE):
             break
     return out
 
@@ -264,6 +265,9 @@ def run_deep(con, image_ids=None) -> int:
 def run_alerts(con) -> int:
     n = 0
     for r in con.execute("""SELECT * FROM alerts WHERE cls='TDE' AND probability >= 0.5 AND stamp_path IS NOT NULL""").fetchall():
+        xs = con.execute("SELECT verdict FROM astronomical_objects WHERE ref=?", (f"alert:{r['survey']}:{r['oid']}",)).fetchone()
+        if not vetting.tde_ok(r["survey"], r["oid"], xs["verdict"] if xs else None)[0]:
+            continue
         n += record(con, {
             "key": f"tde:{r['survey']}:{r['oid']}", "source": r["survey"], "kind": "tde_candidate",
             "score": round(float(r["probability"]), 3),
@@ -458,6 +462,12 @@ def run_xsurvey(con) -> int:
             continue
         title, hyp = XS_INTERESTING[r["verdict"]]
         _, survey, oid = (r["ref"].split(":", 2) + ["", ""])[:3]
+        al = con.execute("SELECT cls, n_det FROM alerts WHERE survey=? AND oid=? ORDER BY id DESC LIMIT 1", (survey, oid)).fetchone()
+        if r["verdict"] == "new_hostless_transient" and r["ref"].startswith("alert:") and not vetting.hostless_ok(
+                survey, oid, al["n_det"] if al else 0, al["cls"] if al else None, vetting.moving_ruled_out_from_report(rep))[0]:
+            continue
+        if r["verdict"] == "supernova_candidate" and not vetting.supernova_ok(al["cls"] if al else None)[0]:
+            continue
         n += record(con, {
             "key": f"xs:{r['ref']}", "source": "xsurvey", "kind": f"xs_{r['verdict']}", "score": round(float(r["verdict_conf"]), 3),
             "title": f"{title}: {oid}", "reason": rep["summary"][:400], "hypotheses": hyp,

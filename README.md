@@ -337,6 +337,10 @@ planet textures Solar System Scope (CC BY 4.0); sky backgrounds from the DESI Le
 Imaging Surveys (legacysurvey.org). Galaxy CNN v2 starts from [Zoobot](https://github.com/mwalmsley/zoobot)
 (Walmsley et al.), and the deep-zoom viewer is [OpenSeadragon](https://openseadragon.github.io/).
 
+## License
+
+Code: [MIT](LICENSE). Data and imagery shown by the app belong to the observatories and archives credited above and keep their own terms.
+
 ## Cross-survey intelligence (`cosmic_watch/xsurvey/`)
 
 For every alert, GCN afterglow and JWST/Hubble detection, the archives are asked what was already there:

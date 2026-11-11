@@ -160,7 +160,7 @@ export function createMars(ctx) {
           <div class="feed-list">${by(r).map((im) => `<button class="feed-item" data-act="img" data-id="${im.id}">
             <span class="chip" style="--c:${SCENE_COLOR[im.stats.scene] || '#94a3b8'}">${esc(im.stats.scene || '?')}</span>
             <b>${esc(im.stats.camera_name)}</b><small>${Math.round((im.stats.scene_conf || 0) * 100)}% · ${timeAgo(im.obs_time)}</small></button>`).join('') || '<p class="feed-dim">No images yet.</p>'}</div>`).join('')}
-        ${finds.length ? `<p class="feed-line">Science highlights today: ${finds.map((im) => `<b>${esc(im.stats.scene)}</b>`).join(', ')}</p>` : ''}
+        ${finds.length ? `<p class="feed-line">Science highlights today: ${finds.map((im) => `<button class="feed-find" data-act="img" data-id="${im.id}" title="${esc(im.stats.camera_name || '')}">${esc(im.stats.scene)}</button>`).join(' ')}</p>` : ''}
         <p class="feed-dim small">Mars texture: Solar System Scope (CC BY 4.0), from NASA data.</p>`;
     },
     onPanel(act, el) { if (act === 'img') this.openImage(el.dataset.id); },

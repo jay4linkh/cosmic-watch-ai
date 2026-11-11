@@ -581,3 +581,8 @@ body.has-tl #agent { bottom: 172px; }
 .tl-days button.active small { background: rgba(255,209,102,0.25); color: #ffe9b0; }
 .tl-imgs button { font-size: 12px; }
 body.has-tl #agent { bottom: 200px; }
+
+/* Mars science highlights: each find opens its photo */
+.feed-find { font: inherit; font-weight: 700; color: var(--ink); background: rgba(255,209,102,0.1); border: 1px solid rgba(255,209,102,0.35);
+  border-radius: 999px; padding: 1px 9px; margin: 2px 2px; cursor: pointer; }
+.feed-find:hover { background: rgba(255,209,102,0.22); }
