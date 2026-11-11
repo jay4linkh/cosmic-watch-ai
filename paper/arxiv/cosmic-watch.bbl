@@ -1,0 +1,201 @@
+\begin{thebibliography}{23}
+\expandafter\ifx\csname natexlab\endcsname\relax\def\natexlab#1{#1}\fi
+\providecommand{\url}[1]{\texttt{#1}}
+\providecommand{\href}[2]{#2}
+\providecommand{\path}[1]{#1}
+\providecommand{\DOIprefix}{doi:}
+\providecommand{\ArXivprefix}{arXiv:}
+\providecommand{\URLprefix}{URL: }
+\providecommand{\Pubmedprefix}{pmid:}
+\providecommand{\doi}[1]{\href{http://dx.doi.org/#1}{\path{#1}}}
+\providecommand{\Pubmed}[1]{\href{pmid:#1}{\path{#1}}}
+\providecommand{\bibinfo}[2]{#2}
+\ifx\xfnm\relax \def\xfnm[#1]{\unskip,\space#1}\fi
+%Type = Article
+\bibitem[{Barbary(2016)}]{Barbary2016}
+\bibinfo{author}{Barbary, K.}, \bibinfo{year}{2016}.
+\newblock \bibinfo{title}{{SEP}: Source extractor as a library}.
+\newblock \bibinfo{journal}{Journal of Open Source Software}
+  \bibinfo{volume}{1}, \bibinfo{pages}{58}.
+\newblock \DOIprefix\doi{10.21105/joss.00058}.
+%Type = Article
+\bibitem[{Bellm et~al.(2019)}]{Bellm2019}
+\bibinfo{author}{Bellm, E.C.}, et~al., \bibinfo{year}{2019}.
+\newblock \bibinfo{title}{The {Zwicky Transient Facility}: System overview,
+  performance, and first results}.
+\newblock \bibinfo{journal}{Publications of the Astronomical Society of the
+  Pacific} \bibinfo{volume}{131}, \bibinfo{pages}{018002}.
+\newblock \DOIprefix\doi{10.1088/1538-3873/aaecbe}.
+%Type = Article
+\bibitem[{Bertin and Arnouts(1996)}]{Bertin1996}
+\bibinfo{author}{Bertin, E.}, \bibinfo{author}{Arnouts, S.},
+  \bibinfo{year}{1996}.
+\newblock \bibinfo{title}{{SExtractor}: Software for source extraction}.
+\newblock \bibinfo{journal}{Astronomy and Astrophysics Supplement Series}
+  \bibinfo{volume}{117}, \bibinfo{pages}{393--404}.
+\newblock \DOIprefix\doi{10.1051/aas:1996164}.
+%Type = Article
+\bibitem[{Brueckner et~al.(1995)}]{Brueckner1995}
+\bibinfo{author}{Brueckner, G.E.}, et~al., \bibinfo{year}{1995}.
+\newblock \bibinfo{title}{The {Large Angle Spectroscopic Coronagraph}
+  ({LASCO})}.
+\newblock \bibinfo{journal}{Solar Physics} \bibinfo{volume}{162},
+  \bibinfo{pages}{357--402}.
+\newblock \DOIprefix\doi{10.1007/BF00733434}.
+%Type = Misc
+\bibitem[{Chambers et~al.(2016)}]{Chambers2016}
+\bibinfo{author}{Chambers, K.C.}, et~al., \bibinfo{year}{2016}.
+\newblock \bibinfo{title}{The {Pan-STARRS1} surveys}.
+\newblock \href{http://arxiv.org/abs/1612.05560}{{\tt arXiv:1612.05560}}.
+%Type = Article
+\bibitem[{Dey et~al.(2019)}]{Dey2019}
+\bibinfo{author}{Dey, A.}, et~al., \bibinfo{year}{2019}.
+\newblock \bibinfo{title}{Overview of the {DESI Legacy Imaging Surveys}}.
+\newblock \bibinfo{journal}{The Astronomical Journal} \bibinfo{volume}{157},
+  \bibinfo{pages}{168}.
+\newblock \DOIprefix\doi{10.3847/1538-3881/ab089d}.
+%Type = Article
+\bibitem[{F{\"o}rster et~al.(2021)}]{Forster2021}
+\bibinfo{author}{F{\"o}rster, F.}, et~al., \bibinfo{year}{2021}.
+\newblock \bibinfo{title}{The automatic learning for the rapid classification
+  of events ({ALeRCE}) alert broker}.
+\newblock \bibinfo{journal}{The Astronomical Journal} \bibinfo{volume}{161},
+  \bibinfo{pages}{242}.
+\newblock \DOIprefix\doi{10.3847/1538-3881/abe9bc}.
+%Type = Article
+\bibitem[{{Gaia Collaboration} et~al.(2023){Gaia Collaboration}, Vallenari
+  et~al.}]{Gaia2023}
+\bibinfo{author}{{Gaia Collaboration}}, \bibinfo{author}{Vallenari, A.},
+  et~al., \bibinfo{year}{2023}.
+\newblock \bibinfo{title}{{Gaia Data Release 3}: Summary of the content and
+  survey properties}.
+\newblock \bibinfo{journal}{Astronomy and Astrophysics} \bibinfo{volume}{674},
+  \bibinfo{pages}{A1}.
+\newblock \DOIprefix\doi{10.1051/0004-6361/202243940}.
+%Type = Inproceedings
+\bibitem[{He et~al.(2016)He, Zhang, Ren and Sun}]{He2016}
+\bibinfo{author}{He, K.}, \bibinfo{author}{Zhang, X.}, \bibinfo{author}{Ren,
+  S.}, \bibinfo{author}{Sun, J.}, \bibinfo{year}{2016}.
+\newblock \bibinfo{title}{Deep residual learning for image recognition}, in:
+  \bibinfo{booktitle}{Proceedings of the IEEE Conference on Computer Vision and
+  Pattern Recognition (CVPR)}, pp. \bibinfo{pages}{770--778}.
+\newblock \DOIprefix\doi{10.1109/CVPR.2016.90}.
+%Type = Article
+\bibitem[{Ivezi{\'c} et~al.(2019)}]{Ivezic2019}
+\bibinfo{author}{Ivezi{\'c}, {\v{Z}}.}, et~al., \bibinfo{year}{2019}.
+\newblock \bibinfo{title}{{LSST}: From science drivers to reference design and
+  anticipated data products}.
+\newblock \bibinfo{journal}{The Astrophysical Journal} \bibinfo{volume}{873},
+  \bibinfo{pages}{111}.
+\newblock \DOIprefix\doi{10.3847/1538-4357/ab042c}.
+%Type = Article
+\bibitem[{Lemen et~al.(2012)}]{Lemen2012}
+\bibinfo{author}{Lemen, J.R.}, et~al., \bibinfo{year}{2012}.
+\newblock \bibinfo{title}{The {Atmospheric Imaging Assembly} ({AIA}) on the
+  {Solar Dynamics Observatory} ({SDO})}.
+\newblock \bibinfo{journal}{Solar Physics} \bibinfo{volume}{275},
+  \bibinfo{pages}{17--40}.
+\newblock \DOIprefix\doi{10.1007/s11207-011-9776-8}.
+%Type = Article
+\bibitem[{Leung and Bovy(2019)}]{Leung2019}
+\bibinfo{author}{Leung, H.W.}, \bibinfo{author}{Bovy, J.},
+  \bibinfo{year}{2019}.
+\newblock \bibinfo{title}{Deep learning of multi-element abundances from
+  high-resolution spectroscopic data}.
+\newblock \bibinfo{journal}{Monthly Notices of the Royal Astronomical Society}
+  \bibinfo{volume}{483}, \bibinfo{pages}{3255--3277}.
+\newblock \DOIprefix\doi{10.1093/mnras/sty3217}. \bibinfo{note}{astroNN; the
+  Galaxy10 DECaLS data set is distributed with astroNN}.
+%Type = Inproceedings
+\bibitem[{Liang et~al.(2021)Liang, Cao, Sun, Zhang, {Van Gool} and
+  Timofte}]{Liang2021}
+\bibinfo{author}{Liang, J.}, \bibinfo{author}{Cao, J.}, \bibinfo{author}{Sun,
+  G.}, \bibinfo{author}{Zhang, K.}, \bibinfo{author}{{Van Gool}, L.},
+  \bibinfo{author}{Timofte, R.}, \bibinfo{year}{2021}.
+\newblock \bibinfo{title}{{SwinIR}: Image restoration using {Swin}
+  transformer}, in: \bibinfo{booktitle}{Proceedings of the IEEE/CVF
+  International Conference on Computer Vision Workshops (ICCVW)}, pp.
+  \bibinfo{pages}{1833--1844}.
+\newblock \DOIprefix\doi{10.1109/ICCVW54120.2021.00210}.
+%Type = Inproceedings
+\bibitem[{Liu et~al.(2008)Liu, Ting and Zhou}]{Liu2008}
+\bibinfo{author}{Liu, F.T.}, \bibinfo{author}{Ting, K.M.},
+  \bibinfo{author}{Zhou, Z.H.}, \bibinfo{year}{2008}.
+\newblock \bibinfo{title}{Isolation forest}, in: \bibinfo{booktitle}{2008
+  Eighth IEEE International Conference on Data Mining}, pp.
+  \bibinfo{pages}{413--422}.
+\newblock \DOIprefix\doi{10.1109/ICDM.2008.17}.
+%Type = Inproceedings
+\bibitem[{Liu et~al.(2022)Liu, Mao, Wu, Feichtenhofer, Darrell and
+  Xie}]{Liu2022}
+\bibinfo{author}{Liu, Z.}, \bibinfo{author}{Mao, H.}, \bibinfo{author}{Wu,
+  C.Y.}, \bibinfo{author}{Feichtenhofer, C.}, \bibinfo{author}{Darrell, T.},
+  \bibinfo{author}{Xie, S.}, \bibinfo{year}{2022}.
+\newblock \bibinfo{title}{A {ConvNet} for the 2020s}, in:
+  \bibinfo{booktitle}{Proceedings of the IEEE/CVF Conference on Computer Vision
+  and Pattern Recognition (CVPR)}, pp. \bibinfo{pages}{11976--11986}.
+\newblock \DOIprefix\doi{10.1109/CVPR52688.2022.01167}.
+%Type = Misc
+\bibitem[{Lu and Wagstaff(2020)}]{Lu2020}
+\bibinfo{author}{Lu, S.}, \bibinfo{author}{Wagstaff, K.L.},
+  \bibinfo{year}{2020}.
+\newblock \bibinfo{title}{{MSL Curiosity Rover} images with science and
+  engineering classes}.
+\newblock \DOIprefix\doi{10.5281/zenodo.4033453}.
+%Type = Misc
+\bibitem[{Lugaresi et~al.(2019)}]{Lugaresi2019}
+\bibinfo{author}{Lugaresi, C.}, et~al., \bibinfo{year}{2019}.
+\newblock \bibinfo{title}{{MediaPipe}: A framework for building perception
+  pipelines}.
+\newblock \href{http://arxiv.org/abs/1906.08172}{{\tt arXiv:1906.08172}}.
+%Type = Article
+\bibitem[{Pesnell et~al.(2012)Pesnell, Thompson and Chamberlin}]{Pesnell2012}
+\bibinfo{author}{Pesnell, W.D.}, \bibinfo{author}{Thompson, B.J.},
+  \bibinfo{author}{Chamberlin, P.C.}, \bibinfo{year}{2012}.
+\newblock \bibinfo{title}{The {Solar Dynamics Observatory} ({SDO})}.
+\newblock \bibinfo{journal}{Solar Physics} \bibinfo{volume}{275},
+  \bibinfo{pages}{3--15}.
+\newblock \DOIprefix\doi{10.1007/s11207-011-9841-3}.
+%Type = Article
+\bibitem[{Thompson(1933)}]{Thompson1933}
+\bibinfo{author}{Thompson, W.R.}, \bibinfo{year}{1933}.
+\newblock \bibinfo{title}{On the likelihood that one unknown probability
+  exceeds another in view of the evidence of two samples}.
+\newblock \bibinfo{journal}{Biometrika} \bibinfo{volume}{25},
+  \bibinfo{pages}{285--294}.
+\newblock \DOIprefix\doi{10.1093/biomet/25.3-4.285}.
+%Type = Article
+\bibitem[{Walmsley et~al.(2022)}]{Walmsley2022}
+\bibinfo{author}{Walmsley, M.}, et~al., \bibinfo{year}{2022}.
+\newblock \bibinfo{title}{{Galaxy Zoo DECaLS}: Detailed visual morphology
+  measurements from volunteers and deep learning for 314 000 galaxies}.
+\newblock \bibinfo{journal}{Monthly Notices of the Royal Astronomical Society}
+  \bibinfo{volume}{509}, \bibinfo{pages}{3966--3988}.
+\newblock \DOIprefix\doi{10.1093/mnras/stab2093}.
+%Type = Article
+\bibitem[{Walmsley et~al.(2023)}]{Walmsley2023}
+\bibinfo{author}{Walmsley, M.}, et~al., \bibinfo{year}{2023}.
+\newblock \bibinfo{title}{{Zoobot}: Adaptable deep learning models for galaxy
+  morphology}.
+\newblock \bibinfo{journal}{Journal of Open Source Software}
+  \bibinfo{volume}{8}, \bibinfo{pages}{5312}.
+\newblock \DOIprefix\doi{10.21105/joss.05312}.
+%Type = Inproceedings
+\bibitem[{Wang et~al.(2021)Wang, Xie, Dong and Shan}]{Wang2021}
+\bibinfo{author}{Wang, X.}, \bibinfo{author}{Xie, L.}, \bibinfo{author}{Dong,
+  C.}, \bibinfo{author}{Shan, Y.}, \bibinfo{year}{2021}.
+\newblock \bibinfo{title}{{Real-ESRGAN}: Training real-world blind
+  super-resolution with pure synthetic data}, in:
+  \bibinfo{booktitle}{Proceedings of the IEEE/CVF International Conference on
+  Computer Vision Workshops (ICCVW)}, pp. \bibinfo{pages}{1905--1914}.
+\newblock \DOIprefix\doi{10.1109/ICCVW54120.2021.00217}.
+%Type = Article
+\bibitem[{Wenger et~al.(2000)}]{Wenger2000}
+\bibinfo{author}{Wenger, M.}, et~al., \bibinfo{year}{2000}.
+\newblock \bibinfo{title}{The {SIMBAD} astronomical database: The {CDS}
+  reference database for astronomical objects}.
+\newblock \bibinfo{journal}{Astronomy and Astrophysics Supplement Series}
+  \bibinfo{volume}{143}, \bibinfo{pages}{9--22}.
+\newblock \DOIprefix\doi{10.1051/aas:2000332}.
+
+\end{thebibliography}

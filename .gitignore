@@ -12,3 +12,11 @@ runs/
 
 # demo videos (too large for GitHub)
 media/
+
+# LaTeX build outputs
+paper/arxiv/*.aux
+paper/arxiv/*.log
+paper/arxiv/*.blg
+paper/arxiv/*.out
+paper/arxiv/*.spl
+paper/arxiv/o*.txt

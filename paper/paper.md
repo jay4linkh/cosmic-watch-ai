@@ -172,6 +172,16 @@ preview-image detections are indicative only; Rubin full frames are not public i
 real time. `Cosmic Watch` complements, and does not replace, the archives and
 brokers it draws on.
 
+# AI usage disclosure
+
+Generative AI was used in this work. Anthropic's Claude (Claude Opus models,
+accessed through the Claude Code assistant in 2026) was used to help write,
+refactor and test parts of the software and its documentation, and to help draft
+and edit this paper. The author designed the system and chose the methods, ran
+every experiment, checked every number reported here against the repository's
+result files, and reviewed, modified and validated all AI-assisted code and text.
+The author takes full responsibility for the content of this paper.
+
 # Acknowledgements
 
 This work uses public data and services from NASA, ESA, STScI/MAST, the Vera C.
